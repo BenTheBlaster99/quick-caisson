@@ -38,7 +38,7 @@ export function WallForm() {
           <li>Largeur de caisson : 300–1200 mm. La somme égale toujours la largeur du mur.</li>
           <li>Modifier une largeur prend sur le caisson de droite. Le dernier échange avec celui de gauche. Sinon, refus.</li>
           <li>La largeur du mur se règle depuis la droite, dans les mêmes limites. Ajouter coupe le plus large en deux. Retirer donne sa largeur au voisin.</li>
-          <li>Étagères : un écart sous chaque tablette, égal par défaut. Elles restent au-dessus de la tringle et des tiroirs.</li>
+          <li>Étagères : un écart sous chaque tablette, égal par défaut. Elles montent depuis les tiroirs, et ne traversent pas le vide sous la tringle.</li>
           <li>Tringle : vide dessous de 400 à 1600 mm, 900 par défaut. Haute à 80 mm sous le dessus. Basse au-dessus de ce vide.</li>
           <li>Tiroirs : 16 ou 18 mm, caisse et façade. Une tablette ferme le dessus de la pile. Profondeur − 50 mm, 20 mm plus basse que la façade, fond 8 mm.</li>
           <li>Portes par caisson : aucune, battante ou vitrée. Une porte sous 600 mm, deux à partir de 600 mm, sur la largeur du caisson.</li>

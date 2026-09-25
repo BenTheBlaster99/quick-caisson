@@ -72,7 +72,7 @@ export function ElementForm() {
           <MmField
             label="Vide sous la tringle"
             value={selected.hangingGap}
-            hint={`Limite : ${HANGING_MIN}–${HANGING_MAX} mm. Les étagères restent au-dessus.`}
+            hint={`Limite : ${HANGING_MIN}–${HANGING_MAX} mm. Les étagères restent en dehors de ce vide.`}
             onCommit={setHangingGap}
           />
         )}

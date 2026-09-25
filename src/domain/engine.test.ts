@@ -150,6 +150,15 @@ describe('interiors', () => {
     expect(layout.closingShelf).toEqual({ bottom: 1764, top: 1782 })
   })
 
+  it('stacks shelves up from the drawers, under the empty space of a high rail', () => {
+    const layout = layoutCaisson(wall, box('a', 1000, { rail: 'haute', hangingGap: 900, drawers: 1, shelves: 1, shelfGaps: [30] }))
+    const rail = layout.rails[0].axis
+    expect(layout.closingShelf).not.toBeNull()
+    expect(layout.shelves).toHaveLength(1)
+    expect(layout.shelves[0].bottom).toBe((layout.closingShelf?.top ?? 0) + 30)
+    expect(layout.shelves[0].top).toBeLessThan(rail - 900)
+  })
+
   it('puts shelves only above the hanging gap', () => {
     const layout = layoutCaisson(wall, box('a', 1000, { rail: 'basse', hangingGap: 900, shelves: 2 }))
     expect(layout.rails[0].axis).toBe(18 + 900)

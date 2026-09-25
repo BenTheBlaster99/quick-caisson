@@ -106,8 +106,9 @@ export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
 
   const bankTop = closingShelf ? closingShelf.top : interiorBottom
   const rails = placeRails(caisson.rail, bankTop, interiorTop, caisson.hangingGap, warnings)
-  const shelfZoneBottom = rails.length > 0 ? Math.max(...rails.map((rail) => rail.axis)) + RAIL_CLEAR : bankTop
-  const shelfZoneTop = interiorTop
+  const zone = shelfZone(rails, bankTop, interiorTop, caisson.hangingGap)
+  const shelfZoneBottom = zone.bottom
+  const shelfZoneTop = zone.top
   const zoneHeight = Math.max(0, shelfZoneTop - shelfZoneBottom)
 
   const shelves = placeShelves(shelfZoneBottom, shelfZoneTop, caisson.shelves, caisson.shelfGaps, zoneHeight, warnings)
@@ -160,6 +161,15 @@ function placeRails(
     }
   }
   return rails
+}
+
+/** Shelves stack up from the drawers. The hanging gap under a high rail stays empty. */
+function shelfZone(rails: RailMark[], bankTop: number, interiorTop: number, hangingGap: number): { bottom: number; top: number } {
+  const haute = rails.find((rail) => rail.kind === 'haute')
+  const basse = rails.find((rail) => rail.kind === 'basse')
+  const bottom = basse ? basse.axis + RAIL_CLEAR : bankTop
+  const top = haute ? haute.axis - RAIL_CLEAR - hangingGap : interiorTop
+  return { bottom, top: Math.max(bottom, top) }
 }
 
 function placeShelves(
