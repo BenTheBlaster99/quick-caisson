@@ -1,0 +1,92 @@
+Finish stage 1. Do not start stage 2 or 3.
+
+Stage 1 = a person in an atelier can read the cut list and design one real dressing.
+Stage 2 = nesting (kerf, grain, sheet layout). Not this task.
+Stage 3 = CNC file. Not this task.
+No PDF, no price, no AI, no Tauri, no Roomia.
+
+The screen already exists. Close the holes below.
+
+============================================================
+1. Cut-list axes (bug, do this first)
+============================================================
+
+One rule for every panel row:
+
+  Longueur = the longer side of the panel.
+  Largeur  = the shorter side.
+  If they are equal, either order is fine.
+
+Today a joue is longueur 2400 × largeur 600 (correct).
+A fond is longueur 764 × largeur 2364 (swapped).
+A menuisier would cut the back the wrong way.
+
+In src/domain/cutlist.ts the fond row sets
+  length: inner
+  width: layout.interiorHeight
+Swap those two.
+
+Then check every other role (joue, dessus, dessous, étagère, porte,
+vantail, façade tiroir, côtés tiroir, fond tiroir, socle) against the
+same rule. Tall parts (joue, porte, vantail) keep the height in Longueur.
+
+Add one line under the table, in French:
+
+  Longueur = le grand côté. Largeur = l’autre. Pas de trait de scie, pas de débit de panneau.
+
+============================================================
+2. Chants stay a stub
+============================================================
+
+Keep "avant" or "aucun". Do not invent a full edge-banding spec.
+Rename the column header to "Chant visible" so it does not look like
+a finished banding rule. That learning is the end of stage 1, with
+an atelier, not a guess in code.
+
+============================================================
+3. Numbers to verify by hand
+============================================================
+
+Wall 3200 × 2500 × 600, socle 80, jeu 20.
+Usable height = 2400.
+Four caissons of 800.
+Caisson 1: 5 étagères, no rail, no drawers, no pantalonnière, battantes, chêne.
+
+Expect, per that caisson:
+  2 joues          2400 × 600 × 18
+  1 dessus          764 × 600 × 18   (longueur 764, largeur 600 — 764 is longer)
+  1 dessous         764 × 600 × 18
+  1 fond rapporté  2364 × 764 × 8    (longueur 2364, largeur 764)
+  5 étagères        764 × 580 × 18
+  2 portes         2400 × 400 × 18
+
+Interior width = 800 − 2×18 = 764.
+Interior height = 2400 − 2×18 = 2364.
+Shelf depth = 600 − 20 = 580.
+If the table does not match this, the list is still wrong.
+
+============================================================
+4. Still stage 1, still this prototype
+============================================================
+
+- Doors closed by default. The open view stays behind "Ouvrir les façades".
+- Socle is a plinth under the boxes in the 3D, height = socle. If socle is 0, no plinth.
+- Elevation stamps "pantalonnière" only on a caisson that has one.
+- Warnings already computed in layout (tiroirs, tringle, étagères) must be visible
+  under "Cet élément", not only in the console.
+- Clicking a column on the elevation selects it, same as the strip.
+- Save then Ouvrir must restore wall, widths, interiors, front, finish.
+- Sum of caisson widths stays equal to the wall. Editing a width still
+  takes from the neighbour on the right. Last caisson trades with the left.
+  An edit that would drop a caisson under 300 mm is refused.
+
+Do not restyle this into 2020 Design or KitchenDraw.
+Flat colour and an elevation are enough. The test is the millimetres.
+
+============================================================
+5. Done when
+============================================================
+
+The hand check in section 3 matches the table.
+Save / open round-trips.
+Then stop. The next step is a real dressing from an atelier, not nesting.

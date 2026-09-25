@@ -1,0 +1,200 @@
+CAISSON — build this. Roomia is a different repo. Do not edit Roomia.
+
+Working folder: /home/jackhammer/Projects/caisson
+This disk is ext4. Do not put this project on the DATA drive (NTFS has killed .git).
+
+Brand later. Mental model: a caisson configurator. Dressing is the first wall.
+Same engine later: placard, meuble d'entrée, meuble salon. Not kitchens.
+
+============================================================
+AGREEMENT (locked)
+============================================================
+
+Prototype a deterministic caisson engine. Dressing = first wall.
+Success is NOT "they liked the picture".
+Success: one atelier designs one real dressing in this, faster than SketchUp,
+and a person can read the cut list.
+
+Do not claim this replaces SketchUp, Polyboard, or 2020 Design.
+Pitch: design this kind of custom furniture faster.
+
+AI does not draw geometry and does not set a price.
+Windows installer waits until that atelier test passes.
+First build is a browser app (React + TypeScript + Vite + Three.js).
+
+Two products, do not mix them:
+- Roomia Visual (existing): photo → photoreal. Stays in the Roomia repo.
+- This app: millimetres → caissons → 3D + elevation + human cut list.
+
+============================================================
+MVP — DONE MEANS
+============================================================
+
+Browser. One wall. Split into caissons. Edit widths. Fill each column.
+Simple front for the whole wall. Three finishes.
+Live 3D + dimensioned elevation.
+Human-readable cut list on the same page.
+Save / open a JSON project file.
+
+No PDF. No price. No AI. No Roomia render. No installer.
+No L/U walls. No CNC. No nesting. No kerf. No hardware brands.
+
+UI in French.
+
+============================================================
+SCREEN
+============================================================
+
+Left — Le mur.
+  Largeur, hauteur, profondeur, socle, jeu au plafond. All mm.
+
+Middle — Les caissons.
+  Wall as columns. Click one. Width is an input. Add and remove.
+  Warn when a width is illegal.
+
+Right — Cet élément.
+  Interior of the selected caisson.
+  Then the front for the whole wall.
+  Then the finish.
+
+View — 3D of the wall, and an elevation with cotes
+  (total width, each caisson width, shelf and rail heights).
+
+Cut list — table on the same page.
+Enregistrer / Ouvrir — JSON file.
+
+============================================================
+RULES (defaults — label them "règles par défaut" in the UI)
+============================================================
+
+These are assumptions until one workshop corrects them.
+
+- Sizes are OUTSIDE dimensions.
+- Each caisson is its own box: 2 joues, top, bottom, back.
+- Boxes sit flush. Gap between caissons = 0.
+- Joues are full height. Top and bottom sit BETWEEN the joues.
+- Carcass and shelves: 18 mm. Back: 8 mm.
+- Shelf depth = depth − 20 mm.
+- Back is a simple inset panel. No groove, no rebate.
+  Cut list calls it "fond rapporté".
+- Wall limits:
+    width 600–6000 mm
+    height 1800–2800 mm
+    depth 300–700 mm
+    socle 0–200 mm
+    jeu plafond 0–300 mm
+  Usable height = hauteur − socle − jeu.
+- Caisson width: min 300 mm, max 1200 mm.
+- At least one caisson.
+- Sum of caisson widths ALWAYS equals wall width.
+
+Reflow:
+  Editing a width takes from or gives to the caisson on its right.
+  The last caisson trades with the one on its left.
+  If that would break 300 mm, refuse the edit.
+
+Add:
+  Split the widest caisson in half, only if both halves are ≥ 300 mm.
+  Otherwise refuse.
+
+Remove:
+  Its width goes to the right neighbour, or to the left if it is the last.
+  Cannot remove the final caisson.
+
+============================================================
+INTERIOR (per caisson)
+============================================================
+
+- Étagères: count 0–8, spaced evenly in the free zone.
+  No free-dragged positions in v0.1.
+- Tringle: aucune / haute / basse / double.
+  Haute ≈ 80 mm down from the top of the usable interior.
+  Basse ≈ half of usable interior.
+  A rail is a part in the list, not a priced accessory.
+- Tiroirs: count 0–6, stacked from the bottom, equal height, above the socle.
+  Each drawer = a front + a simple box (2 sides, front, back, bottom).
+  No slides, no Blum.
+- Pantalonnière: yes/no. One pull-out in that column.
+  One accessory line in the list, not a full mechanism.
+
+============================================================
+FRONT (one choice for the whole wall)
+============================================================
+
+- Aucune.
+- Battantes: 1 door if caisson < 600 mm, 2 if ≥ 600 mm.
+  Overlay on the box. Height = usable height.
+- Coulissantes: 2 leaves if wall < 2400 mm, else 3.
+  Leaves span the WALL, not each caisson.
+
+============================================================
+FINISH
+============================================================
+
+Three swatches only: blanc, chêne, anthracite.
+A name and a colour. Every cut-list row gets that material name.
+Real workshop library is later. No admin upload in v0.1.
+
+============================================================
+CUT LIST (human-readable, not CNC)
+============================================================
+
+One row per part:
+  caisson number, role (joue, dessus, dessous, fond, étagère,
+  porte, tiroir…), quantity, length, width, thickness, material, chants.
+No kerf. No nesting. No grain. No drilling.
+Sorted by caisson, then by role.
+
+Sizing convention:
+  Joues: height = usable height? Wait — full box height.
+  Lock this:
+  - Caisson outside: width W, height = usable height H, depth D.
+  - Socle is a separate plinth under the boxes, not part of the caisson carcass.
+    Plinth: one front rail (and simple returns) across the wall, height = socle.
+    If socle is 0, no plinth parts.
+  - 2 joues: H × D × 18
+  - Dessus and dessous: (W − 2×18) × D × 18
+  - Fond rapporté: (W − 2×18) × (H − 2×18) × 8
+  - Étagère: (W − 2×18) × (D − 20) × 18
+  - Door (battante): height H, width = W / doorCount (overlay, ignore gaps in v0.1)
+  - Sliding leaf: height H, width = wallWidth / leafCount
+  - Drawer front: width (W − 2×18), height = drawer zone / count
+  - Drawer box: simple, 18 mm, depth D − 50 mm. Bottom 8 mm.
+  - Rail: length = W − 2×18, listed as "tringle" with diameter note 25 mm, not a panel.
+
+============================================================
+NOT IN THIS MVP
+============================================================
+
+PDF, price, AI sentence-to-config, Roomia photo render,
+L/U walls, angles, material admin, hardware brands,
+nesting, CNC, kitchens, Windows installer, Tauri.
+
+After an atelier says the configurator is right:
+  their real rules if ours were wrong,
+  PDF, simple price (their formula),
+  Tauri Windows installer,
+  then Roomia render of the 3D in the client photo.
+AI that fills a wall from a sentence only after this engine is the source of truth.
+
+============================================================
+WHY (field notes, so you don't re-open Roomia)
+============================================================
+
+From cuisiniste meetings (Sept 2026):
+
+- Arex (2020 Design + SketchUp + 3ds): conception ~1h30 free, render 4h+.
+  ~30 conceptions/month, ~19 buy. Wants a render in minutes.
+  That render pain is ROOMIA, not this app.
+- Cuisine 3 + HS Design: need a caisson system and editable caisson widths.
+- Ixina: Composer is for the client, not the pro. Asked for placards / dressings
+  because SketchUp eats time. Dressing = width × height × depth, then
+  étagères, tiroirs, accessoires. Also meuble salon, meuble d'entrée.
+  Kitchens are "another world" — do not build kitchen CAD here.
+- CF uses Polyboard. IDEA is opening a 1300 m² machining center
+  (cut list matters later; do not promise CNC now).
+- Youadssine wants measures at the end. The cut list is that, for dressings.
+
+Test later, with HS Design or whoever asked:
+  "Design one real dressing you already did in SketchUp.
+   How long, and can someone cut from this list?"
