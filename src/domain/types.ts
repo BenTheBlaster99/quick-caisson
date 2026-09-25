@@ -1,6 +1,8 @@
 export type RailMode = 'aucune' | 'haute' | 'basse' | 'double'
-export type FrontMode = 'aucune' | 'battantes' | 'coulissantes'
+export type DoorMode = 'aucune' | 'battante' | 'vitree'
 export type FinishId = 'blanc' | 'chene' | 'anthracite'
+export type DoorFinishId = FinishId | 'verre'
+export type DrawerThickness = 16 | 18
 
 export type Wall = {
   width: number
@@ -14,8 +16,15 @@ export type Caisson = {
   id: string
   width: number
   shelves: number
+  /** Gap under each shelf, from the shelf below or from the bottom of the free zone. */
+  shelfGaps: number[]
   rail: RailMode
+  /** Empty height under the rail, in mm. Used when a rail is present. */
+  hangingGap: number
   drawers: number
+  drawerThickness: DrawerThickness
+  door: DoorMode
+  doorFinish: DoorFinishId
   pantalonniere: boolean
 }
 
@@ -23,7 +32,6 @@ export type Project = {
   format: 'caisson-project'
   version: 1
   wall: Wall
-  front: FrontMode
   finish: FinishId
   caissons: Caisson[]
 }

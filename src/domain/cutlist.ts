@@ -1,5 +1,5 @@
-import { doorCountForCaisson, layoutCaisson, slidingLeafCount, usableHeight } from './layout'
-import { BACK, finishById, PANEL, splitEven } from './rules'
+import { doorCountForCaisson, layoutCaisson, usableHeight } from './layout'
+import { BACK, doorFinishById, finishById, PANEL, splitEven } from './rules'
 import type { CutRow, Project } from './types'
 
 const ROLE = {
@@ -8,15 +8,14 @@ const ROLE = {
   dessous: 30,
   fond: 40,
   etagere: 50,
+  dessusTiroirs: 55,
   tringle: 60,
   facade: 70,
   cote: 80,
   devant: 90,
   derriere: 100,
   fondTiroir: 110,
-  panto: 120,
   porte: 130,
-  vantail: 140,
   socle: 150,
   retour: 160,
 } as const
@@ -77,13 +76,27 @@ export function buildCutList(project: Project): CutRow[] {
       edges: 'aucun',
     })
 
-    if (caisson.shelves > 0) {
+    if (layout.shelves.length > 0) {
       push(rows, {
         caisson: label,
         caissonIndex: index,
         role: 'étagère',
         roleOrder: ROLE.etagere,
-        quantity: caisson.shelves,
+        quantity: layout.shelves.length,
+        ...longSide(inner, layout.shelfDepth),
+        thickness: PANEL,
+        material,
+        edges: 'avant',
+      })
+    }
+
+    if (layout.closingShelf) {
+      push(rows, {
+        caisson: label,
+        caissonIndex: index,
+        role: 'dessus tiroirs',
+        roleOrder: ROLE.dessusTiroirs,
+        quantity: 1,
         ...longSide(inner, layout.shelfDepth),
         thickness: PANEL,
         material,
@@ -106,8 +119,9 @@ export function buildCutList(project: Project): CutRow[] {
       })
     }
 
+    const board = caisson.drawerThickness
     for (const drawer of layout.drawers) {
-      const boxWidth = inner - 2 * PANEL
+      const boxWidth = inner - 2 * board
       const boxDepth = layout.drawerDepth
       push(rows, {
         caisson: label,
@@ -116,7 +130,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.facade,
         quantity: 1,
         ...longSide(inner, drawer.height),
-        thickness: PANEL,
+        thickness: board,
         material,
         edges: 'avant',
       })
@@ -127,7 +141,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.cote,
         quantity: 2,
         ...longSide(boxDepth, drawer.boxHeight),
-        thickness: PANEL,
+        thickness: board,
         material,
         edges: 'aucun',
       })
@@ -138,7 +152,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.devant,
         quantity: 1,
         ...longSide(boxWidth, drawer.boxHeight),
-        thickness: PANEL,
+        thickness: board,
         material,
         edges: 'aucun',
       })
@@ -149,7 +163,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.derriere,
         quantity: 1,
         ...longSide(boxWidth, drawer.boxHeight),
-        thickness: PANEL,
+        thickness: board,
         material,
         edges: 'aucun',
       })
@@ -159,30 +173,17 @@ export function buildCutList(project: Project): CutRow[] {
         role: 'fond tiroir',
         roleOrder: ROLE.fondTiroir,
         quantity: 1,
-        ...longSide(boxWidth, boxDepth - 2 * PANEL),
+        ...longSide(boxWidth, boxDepth - 2 * board),
         thickness: BACK,
         material,
         edges: 'aucun',
       })
     }
 
-    if (caisson.pantalonniere) {
-      push(rows, {
-        caisson: label,
-        caissonIndex: index,
-        role: 'pantalonnière',
-        roleOrder: ROLE.panto,
-        quantity: 1,
-        ...longSide(inner, layout.drawerDepth),
-        thickness: null,
-        material,
-        edges: '—',
-      })
-    }
-
-    if (project.front === 'battantes') {
+    if (caisson.door !== 'aucune') {
       const count = doorCountForCaisson(caisson.width)
       const widths = splitEven(caisson.width, count)
+      const doorMaterial = caisson.door === 'vitree' || caisson.doorFinish === 'verre' ? 'verre' : doorFinishById(caisson.doorFinish).name
       for (const doorWidth of widths) {
         push(rows, {
           caisson: label,
@@ -192,30 +193,12 @@ export function buildCutList(project: Project): CutRow[] {
           quantity: 1,
           ...longSide(height, doorWidth),
           thickness: PANEL,
-          material,
+          material: doorMaterial,
           edges: 'avant',
         })
       }
     }
   })
-
-  if (project.front === 'coulissantes') {
-    const count = slidingLeafCount(project.wall.width)
-    const widths = splitEven(project.wall.width, count)
-    for (const leafWidth of widths) {
-      push(rows, {
-        caisson: 'mur',
-        caissonIndex: 1000,
-        role: 'vantail',
-        roleOrder: ROLE.vantail,
-        quantity: 1,
-        ...longSide(height, leafWidth),
-        thickness: PANEL,
-        material,
-        edges: 'avant',
-      })
-    }
-  }
 
   if (project.wall.socle > 0) {
     push(rows, {

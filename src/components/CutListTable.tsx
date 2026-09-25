@@ -6,9 +6,11 @@ import { useProject } from '../state/project-context'
 export function CutListTable({
   selectedKey,
   onSelect,
+  quiet = false,
 }: {
   selectedKey: string | null
   onSelect: (row: CutRow) => void
+  quiet?: boolean
 }) {
   const { project } = useProject()
   const rows = buildCutList(project)
@@ -17,9 +19,10 @@ export function CutListTable({
   return (
     <section className="cutlist" aria-labelledby="cut-title">
       <header>
-        <h2 id="cut-title">Liste de débit</h2>
+        <h2 id={quiet ? undefined : 'cut-title'}>Liste de débit</h2>
         <p>
-          {rows.length} lignes · {material}. Cliquez une ligne pour la voir dans le dressing.
+          {rows.length} lignes · caisse {material}
+          {quiet ? '' : '. Cliquez une ligne pour la voir dans le dressing.'}
         </p>
       </header>
       <table>
@@ -39,8 +42,8 @@ export function CutListTable({
           {rows.map((row) => (
             <tr
               key={cutRowKey(row)}
-              aria-selected={cutRowKey(row) === selectedKey}
-              onClick={() => onSelect(row)}
+              aria-selected={quiet ? undefined : cutRowKey(row) === selectedKey}
+              onClick={quiet ? undefined : () => onSelect(row)}
             >
               <td>{row.caisson}</td>
               <td>{row.role}</td>

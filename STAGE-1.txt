@@ -1,92 +1,116 @@
-Finish stage 1. Do not start stage 2 or 3.
+Sarah's pass. The five steps already exist. Do this next.
+Do not start nesting, CNC, L/U walls, a price total, or a photoreal render.
 
-Stage 1 = a person in an atelier can read the cut list and design one real dressing.
-Stage 2 = nesting (kerf, grain, sheet layout). Not this task.
-Stage 3 = CNC file. Not this task.
-No PDF, no price, no AI, no Tauri, no Roomia.
-
-The screen already exists. Close the holes below.
+She liked La liste: the dressing (or the elevation) beside the cut list,
+and clicking a line lights that piece. Keep that screen.
 
 ============================================================
-1. Cut-list axes (bug, do this first)
+DO NOW
 ============================================================
 
-One rule for every panel row:
+1. Doors follow each caisson
+--------------------------------
+Today, coulissantes ignore the columns. A wall of 600 + 1000 + 300 + 1100
+draws 3 leaves of about 1000 mm. That is wrong.
 
-  Longueur = the longer side of the panel.
-  Largeur  = the shorter side.
-  If they are equal, either order is fine.
+Each caisson chooses its own front:
+  Aucune
+  Battante (one door if the caisson is under 600 mm, two if it is 600 or more)
+  Vitrée (same split, glass)
 
-Today a joue is longueur 2400 × largeur 600 (correct).
-A fond is longueur 764 × largeur 2364 (swapped).
-A menuisier would cut the back the wrong way.
+The door width is that caisson's width, not an even slice of the wall.
+A caisson set to Aucune stays open. She could not open the 300 mm one
+because the old front covered the whole wall.
 
-In src/domain/cutlist.ts the fond row sets
-  length: inner
-  width: layout.interiorHeight
-Swap those two.
+Remove the single wall-wide choice (Aucune / Battantes / Coulissantes)
+from La façade. Put the choice on L'intérieur, on the selected caisson,
+same place as the shelves.
 
-Then check every other role (joue, dessus, dessous, étagère, porte,
-vantail, façade tiroir, côtés tiroir, fond tiroir, socle) against the
-same rule. Tall parts (joue, porte, vantail) keep the height in Longueur.
+Coulissantes across the whole wall are not in this pass.
 
-Add one line under the table, in French:
+2. Two colours
+--------------------------------
+The carcass has one finish: Blanc, Chêne, Anthracite.
+Each caisson's doors have their own finish: Blanc, Chêne, Anthracite, Verre.
+Verre is a door only. The box behind it stays the carcass colour.
+A glass door still has a size in the cut list. Mark the material "verre".
 
-  Longueur = le grand côté. Largeur = l’autre. Pas de trait de scie, pas de débit de panneau.
+3. Rail, then empty hanging space
+--------------------------------
+A tringle is not only haute / basse / double.
+When a caisson has a rail, ask "vide sous la tringle" in mm
+(how much empty height under the rail for hanging clothes).
+Default 900 mm. Allowed 400–1600 mm.
+
+Shelves in that caisson go only ABOVE the rail.
+The hanging gap stays empty. Do not stack shelves through it.
+
+4. Shelf gaps are not always equal
+--------------------------------
+Keep a count. Also show one mm field per shelf: distance from the shelf
+below it, or from the bottom of the free zone for the lowest shelf.
+Default those distances to equal. The user can change each one.
+If a distance does not fit, refuse that edit and say so. Do not overlap
+the rail gap, the drawers, or the top panel.
+
+5. A shelf closes the drawer stack
+--------------------------------
+If a caisson has drawers, add one fixed shelf (or top panel of the
+drawer bank) on top of the highest drawer. It is automatic. It is not
+one of the counted shelves. The cut list includes it. The inside should
+not look open above the drawers.
+
+6. Drawer thickness
+--------------------------------
+Carcass stays 18 mm. That top and bottom thickness is correct. Leave it.
+Add "épaisseur des tiroirs": 16 or 18 mm. It applies to the drawer box
+and the drawer front. Default 18.
+
+7. Wall height
+--------------------------------
+Hauteur max is 2800 mm. Raise the limit to 3600 mm.
+Min stays 1800. Label the field Limite, as now.
+
+8. Hide the pantalonnière
+--------------------------------
+Remove it from L'intérieur. Do not delete the saved-project field:
+old files that have one still open, and the part simply does not show
+until we put the control back. Sarah is asking her mother before we
+keep it.
+
+9. Navigation
+--------------------------------
+Remove Retour and Continuer. The step names along the top are enough.
+
+Rename the toolbar so a person knows what it does:
+  Recadrer -> Recentrer la vue (resets the camera; it must actually click)
+  Ouvrir -> Ouvrir un projet
+  Enregistrer -> Enregistrer le projet
+The file is still JSON. Do not mention JSON on screen.
+Ouvrir reads that file back. She does not open it in another program.
 
 ============================================================
-2. Chants stay a stub
+NOT THIS BUILD
 ============================================================
 
-Keep "avant" or "aucun". Do not invent a full edge-banding spec.
-Rename the column header to "Chant visible" so it does not look like
-a finished banding rule. That learning is the end of stage 1, with
-an atelier, not a guess in code.
+- Dressing en L or en U. One straight wall stays the whole product
+  until the door and the rail rules above are right.
+- A price total. Tell Ixina it can be added: their formula
+  (surface or per caisson), typed by them, not guessed. No number
+  in the app until one atelier gives the formula.
+- Photoreal. What they show the client today is this 3D and the
+  elevation. A photoreal picture of that same dressing is Roomia,
+  later, on a capture of this view. Do not build it here.
+- Nesting, kerf, grain, CNC, PDF, Tauri.
 
 ============================================================
-3. Numbers to verify by hand
+DONE WHEN
 ============================================================
 
-Wall 3200 × 2500 × 600, socle 80, jeu 20.
-Usable height = 2400.
-Four caissons of 800.
-Caisson 1: 5 étagères, no rail, no drawers, no pantalonnière, battantes, chêne.
-
-Expect, per that caisson:
-  2 joues          2400 × 600 × 18
-  1 dessus          764 × 600 × 18   (longueur 764, largeur 600 — 764 is longer)
-  1 dessous         764 × 600 × 18
-  1 fond rapporté  2364 × 764 × 8    (longueur 2364, largeur 764)
-  5 étagères        764 × 580 × 18
-  2 portes         2400 × 400 × 18
-
-Interior width = 800 − 2×18 = 764.
-Interior height = 2400 − 2×18 = 2364.
-Shelf depth = 600 − 20 = 580.
-If the table does not match this, the list is still wrong.
-
-============================================================
-4. Still stage 1, still this prototype
-============================================================
-
-- Doors closed by default. The open view stays behind "Ouvrir les façades".
-- Socle is a plinth under the boxes in the 3D, height = socle. If socle is 0, no plinth.
-- Elevation stamps "pantalonnière" only on a caisson that has one.
-- Warnings already computed in layout (tiroirs, tringle, étagères) must be visible
-  under "Cet élément", not only in the console.
-- Clicking a column on the elevation selects it, same as the strip.
-- Save then Ouvrir must restore wall, widths, interiors, front, finish.
-- Sum of caisson widths stays equal to the wall. Editing a width still
-  takes from the neighbour on the right. Last caisson trades with the left.
-  An edit that would drop a caisson under 300 mm is refused.
-
-Do not restyle this into 2020 Design or KitchenDraw.
-Flat colour and an elevation are enough. The test is the millimetres.
-
-============================================================
-5. Done when
-============================================================
-
-The hand check in section 3 matches the table.
-Save / open round-trips.
-Then stop. The next step is a real dressing from an atelier, not nesting.
+Wall of four caissons: 600, 1000, 300, 1100.
+Caisson 600: one hinged door, chêne on a blanc carcass.
+Caisson 1000: rail, vide sous la tringle 900, shelves only above that gap.
+Caisson 300: no door, so the inside is visible.
+Caisson 1100: drawers, 16 mm, and one automatic shelf on top of them.
+The cut list door widths match those caissons, not three equal leaves.
+La liste still lights the piece you click.

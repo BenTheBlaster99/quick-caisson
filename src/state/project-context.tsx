@@ -1,8 +1,9 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { addCaisson, removeCaisson, setCaissonWidth } from '../domain/caissons'
+import { applyHangingGap, applyRail, applyShelfCount, applyShelfGap } from '../domain/layout'
 import { applyWidths, createId, defaultProject, parseProject, serializeProject, setWallField } from '../domain/project'
 import type { WallField } from '../domain/rules'
-import type { Caisson, FinishId, FrontMode, Project } from '../domain/types'
+import type { Caisson, DoorFinishId, DoorMode, DrawerThickness, FinishId, Project, RailMode } from '../domain/types'
 
 type ProjectApi = {
   project: Project
@@ -15,8 +16,14 @@ type ProjectApi = {
   add: () => void
   remove: () => void
   select: (id: string) => void
-  patchSelected: (patch: Partial<Pick<Caisson, 'shelves' | 'rail' | 'drawers' | 'pantalonniere'>>) => void
-  setFront: (front: FrontMode) => void
+  setShelves: (count: number) => void
+  setShelfGap: (index: number, gap: number) => boolean
+  setRail: (rail: RailMode) => boolean
+  setHangingGap: (gap: number) => boolean
+  setDrawers: (count: number) => void
+  setDrawerThickness: (thickness: DrawerThickness) => void
+  setDoor: (door: DoorMode) => void
+  setDoorFinish: (finish: DoorFinishId) => void
   setFinish: (finish: FinishId) => void
   toggleDoors: () => void
   reframe: () => void
@@ -37,6 +44,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const selected = project.caissons.find((caisson) => caisson.id === selectedId) ?? project.caissons[0]
 
   const api = useMemo<ProjectApi>(() => {
+    function replaceSelected(next: Caisson) {
+      setProject((current) => ({
+        ...current,
+        caissons: current.caissons.map((caisson) => (caisson.id === selected.id ? next : caisson)),
+      }))
+    }
+
     return {
       project,
       selected,
@@ -92,17 +106,63 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       select(id) {
         setSelectedId(id)
       },
-      patchSelected(patch) {
+      setShelves(count) {
         setProject((current) => ({
           ...current,
           caissons: current.caissons.map((caisson) =>
-            caisson.id === selected.id ? { ...caisson, ...patch } : caisson,
+            caisson.id === selected.id ? applyShelfCount(current.wall, caisson, count) : caisson,
           ),
         }))
         setNotice(null)
       },
-      setFront(front) {
-        setProject((current) => ({ ...current, front }))
+      setShelfGap(index, gap) {
+        const result = applyShelfGap(project.wall, selected, index, gap)
+        if (!result.ok) {
+          setNotice(result.error)
+          return false
+        }
+        replaceSelected(result.caisson)
+        setNotice(null)
+        return true
+      },
+      setRail(rail) {
+        const result = applyRail(project.wall, selected, rail)
+        if (!result.ok) {
+          setNotice(result.error)
+          return false
+        }
+        replaceSelected(result.caisson)
+        setNotice(null)
+        return true
+      },
+      setHangingGap(gap) {
+        const result = applyHangingGap(project.wall, selected, gap)
+        if (!result.ok) {
+          setNotice(result.error)
+          return false
+        }
+        replaceSelected(result.caisson)
+        setNotice(null)
+        return true
+      },
+      setDrawers(count) {
+        const next = { ...selected, drawers: count }
+        replaceSelected(applyShelfCount(project.wall, next, next.shelves))
+        setNotice(null)
+      },
+      setDrawerThickness(thickness) {
+        replaceSelected({ ...selected, drawerThickness: thickness })
+        setNotice(null)
+      },
+      setDoor(door) {
+        const doorFinish = door === 'vitree' ? 'verre' : selected.doorFinish === 'verre' ? project.finish : selected.doorFinish
+        replaceSelected({ ...selected, door, doorFinish })
+        setNotice(null)
+      },
+      setDoorFinish(finish) {
+        const door: DoorMode = finish === 'verre' ? 'vitree' : selected.door === 'vitree' ? 'battante' : selected.door
+        replaceSelected({ ...selected, door, doorFinish: finish })
+        setNotice(null)
       },
       setFinish(finish) {
         setProject((current) => ({ ...current, finish }))

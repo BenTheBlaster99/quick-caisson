@@ -1,7 +1,8 @@
-import { doorCountForCaisson, layoutCaisson, slidingLeafCount, usableHeight } from '../domain/layout'
-import { FINISHES, splitEven } from '../domain/rules'
-import type { FinishId, FrontMode, RailMode } from '../domain/types'
+import { doorLabel, layoutCaisson } from '../domain/layout'
+import { DOOR_FINISHES, FINISHES, HANGING_MAX, HANGING_MIN } from '../domain/rules'
+import type { DoorFinishId, DoorMode, DrawerThickness, FinishId, RailMode } from '../domain/types'
 import { useProject } from '../state/project-context'
+import { MmField } from './MmField'
 
 const RAILS: { id: RailMode; label: string }[] = [
   { id: 'aucune', label: 'Aucune' },
@@ -10,21 +11,23 @@ const RAILS: { id: RailMode; label: string }[] = [
   { id: 'double', label: 'Double' },
 ]
 
-const FRONTS: { id: FrontMode; label: string }[] = [
+const DOORS: { id: DoorMode; label: string }[] = [
   { id: 'aucune', label: 'Aucune' },
-  { id: 'battantes', label: 'Battantes' },
-  { id: 'coulissantes', label: 'Coulissantes' },
+  { id: 'battante', label: 'Battante' },
+  { id: 'vitree', label: 'Vitrée' },
 ]
 
+const THICKNESS: DrawerThickness[] = [16, 18]
+
 export function ElementForm() {
-  const { project, selected, select, patchSelected } = useProject()
+  const { project, selected, select, setShelves, setShelfGap, setRail, setHangingGap, setDrawers, setDrawerThickness, setDoor, setDoorFinish } = useProject()
   const index = project.caissons.findIndex((caisson) => caisson.id === selected.id)
   const layout = layoutCaisson(project.wall, selected)
 
   return (
     <section className="panel" aria-labelledby="element-title">
       <h2 id="element-title">L'intérieur</h2>
-      <p className="lead">Un caisson à la fois.</p>
+      <p className="lead">Un caisson à la fois. Les portes sont les siennes.</p>
       <div className="picker" role="tablist" aria-label="Choisir un caisson">
         {project.caissons.map((caisson, bayIndex) => (
           <button
@@ -44,40 +47,85 @@ export function ElementForm() {
 
       <div className="block">
         <h3>Étagères</h3>
-        <Stepper value={selected.shelves} min={0} max={8} onChange={(shelves) => patchSelected({ shelves })} />
+        <Stepper value={selected.shelves} min={0} max={8} onChange={setShelves} />
+        {selected.shelfGaps.map((gap, gapIndex) => (
+          <MmField
+            key={`${selected.id}-gap-${gapIndex}`}
+            label={`Écart ${gapIndex + 1}`}
+            value={gap}
+            hint={gapIndex === 0 ? 'Depuis le bas de la zone libre, en mm.' : "Depuis l'étagère du dessous, en mm."}
+            onCommit={(value) => setShelfGap(gapIndex, value)}
+          />
+        ))}
       </div>
 
       <div className="block">
         <h3>Tringle</h3>
         <div className="segment" role="group" aria-label="Tringle">
           {RAILS.map((rail) => (
-            <button
-              key={rail.id}
-              type="button"
-              aria-pressed={selected.rail === rail.id}
-              onClick={() => patchSelected({ rail: rail.id })}
-            >
+            <button key={rail.id} type="button" aria-pressed={selected.rail === rail.id} onClick={() => setRail(rail.id)}>
               {rail.label}
             </button>
           ))}
         </div>
+        {selected.rail !== 'aucune' && (
+          <MmField
+            label="Vide sous la tringle"
+            value={selected.hangingGap}
+            hint={`Limite : ${HANGING_MIN}–${HANGING_MAX} mm. Les étagères restent au-dessus.`}
+            onCommit={setHangingGap}
+          />
+        )}
       </div>
 
       <div className="block">
         <h3>Tiroirs</h3>
-        <Stepper value={selected.drawers} min={0} max={6} onChange={(drawers) => patchSelected({ drawers })} />
+        <Stepper value={selected.drawers} min={0} max={6} onChange={setDrawers} />
+        {selected.drawers > 0 && (
+          <>
+            <p className="summary">Une tablette ferme le dessus de la pile. Elle n'est pas comptée dans les étagères.</p>
+            <div className="segment" role="group" aria-label="Épaisseur des tiroirs">
+              {THICKNESS.map((thickness) => (
+                <button
+                  key={thickness}
+                  type="button"
+                  aria-pressed={selected.drawerThickness === thickness}
+                  onClick={() => setDrawerThickness(thickness)}
+                >
+                  {thickness} mm
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="block">
-        <h3>Pantalonnière</h3>
-        <div className="segment" role="group" aria-label="Pantalonnière">
-          <button type="button" aria-pressed={!selected.pantalonniere} onClick={() => patchSelected({ pantalonniere: false })}>
-            Non
-          </button>
-          <button type="button" aria-pressed={selected.pantalonniere} onClick={() => patchSelected({ pantalonniere: true })}>
-            Oui
-          </button>
+        <h3>Porte</h3>
+        <div className="segment" role="group" aria-label="Porte">
+          {DOORS.map((door) => (
+            <button key={door.id} type="button" aria-pressed={selected.door === door.id} onClick={() => setDoor(door.id)}>
+              {door.label}
+            </button>
+          ))}
         </div>
+        <p className="summary">{doorLabel(selected.door, selected.width)}</p>
+        {selected.door !== 'aucune' && (
+          <div className="swatches" role="group" aria-label="Finition des portes">
+            {DOOR_FINISHES.map((finish) => (
+              <button
+                key={finish.id}
+                type="button"
+                className="swatch"
+                aria-pressed={selected.doorFinish === finish.id}
+                onClick={() => setDoorFinish(finish.id as DoorFinishId)}
+              >
+                <i style={{ background: finish.color }} />
+                {finish.name === 'verre' ? 'Verre' : finish.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {layout.warnings.length > 0 && (
@@ -87,32 +135,20 @@ export function ElementForm() {
           ))}
         </ul>
       )}
-
     </section>
   )
 }
 
 export function FacadeForm() {
-  const { project, setFront, setFinish } = useProject()
+  const { project, setFinish } = useProject()
 
   return (
     <section className="panel" aria-labelledby="facade-title">
       <h2 id="facade-title">La façade</h2>
-      <p className="lead">Une façade pour tout le mur, puis la finition.</p>
+      <p className="lead">La couleur de la caisse. Chaque porte se choisit dans l'intérieur.</p>
       <div className="block">
-        <h3>Façade</h3>
-        <div className="segment" role="group" aria-label="Façade">
-          {FRONTS.map((front) => (
-            <button key={front.id} type="button" aria-pressed={project.front === front.id} onClick={() => setFront(front.id)}>
-              {front.label}
-            </button>
-          ))}
-        </div>
-        <DoorLines project={project} />
-      </div>
-      <div className="block">
-        <h3>Finition</h3>
-        <div className="swatches" role="group" aria-label="Finition">
+        <h3>Caisse</h3>
+        <div className="swatches" role="group" aria-label="Finition de la caisse">
           {FINISHES.map((finish) => (
             <button
               key={finish.id}
@@ -127,30 +163,14 @@ export function FacadeForm() {
           ))}
         </div>
       </div>
-    </section>
-  )
-}
-
-function DoorLines({ project }: { project: ReturnType<typeof useProject>['project'] }) {
-  const height = usableHeight(project.wall)
-  if (project.front === 'aucune') return <p className="summary">Aucune façade.</p>
-  if (project.front === 'coulissantes') {
-    const count = slidingLeafCount(project.wall.width)
-    const widths = splitEven(project.wall.width, count)
-    return <p className="summary">{count} vantaux de {widths.join(' / ')} × {height} mm, sur tout le mur.</p>
-  }
-  return (
-    <ul className="door-lines">
-      {project.caissons.map((caisson, index) => {
-        const count = doorCountForCaisson(caisson.width)
-        const widths = splitEven(caisson.width, count)
-        return (
+      <ul className="door-lines">
+        {project.caissons.map((caisson, index) => (
           <li key={caisson.id}>
-            Caisson {index + 1} · {count} porte{count > 1 ? 's' : ''} de {widths.join(' / ')} × {height} mm
+            Caisson {index + 1} · {doorLabel(caisson.door, caisson.width)}
           </li>
-        )
-      })}
-    </ul>
+        ))}
+      </ul>
+    </section>
   )
 }
 

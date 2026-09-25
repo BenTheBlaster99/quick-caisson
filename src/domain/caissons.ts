@@ -129,9 +129,9 @@ export function addCaisson(caissons: Caisson[], createId: () => string): Structu
   }
 
   const source = caissons[index]
-  const created: Caisson = { ...source, id: createId(), width: right }
+  const created: Caisson = { ...source, id: createId(), width: right, shelfGaps: [...source.shelfGaps] }
   const next = caissons.map((caisson, cursor) =>
-    cursor === index ? { ...caisson, width: left } : caisson,
+    cursor === index ? { ...caisson, width: left, shelfGaps: [...source.shelfGaps] } : caisson,
   )
   next.splice(index + 1, 0, created)
   return { ok: true, caissons: next, selectedIndex: index + 1 }

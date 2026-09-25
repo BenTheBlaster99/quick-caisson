@@ -45,7 +45,7 @@ button {
   min-width: 960px;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .steps {
@@ -469,15 +469,27 @@ button:disabled {
 }
 
 .cotes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 0;
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
   padding: 0 4px;
-  list-style: none;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
 }
+
+.cotes h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.cotes ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+.cotes li + li { margin-top: 2px; }
+
+.cotes p { margin: 0; }
 
 .elevation .fill {
   stroke: #3c342b;
@@ -539,6 +551,66 @@ button:disabled {
 .cutlist td.num, .cutlist th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.print-sheet { display: none; }
+
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+
+  html, body, #root {
+    height: auto;
+    background: white;
+  }
+
+  .app { display: none !important; }
+
+  .print-sheet {
+    display: block;
+    color: #1c1a16;
+  }
+
+  .print-sheet h1 {
+    margin: 0;
+    font-size: 18px;
+  }
+
+  .print-sheet header p {
+    margin: 2px 0 8px;
+    font-size: 12px;
+  }
+
+  .print-sheet .elevation,
+  .print-sheet .cutlist {
+    overflow: visible;
+    height: auto;
+    max-height: none;
+    border: 0;
+    background: white;
+    border-radius: 0;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .print-sheet .elevation svg {
+    width: 100%;
+    height: 95mm;
+  }
+
+  .print-sheet .cutlist header,
+  .print-sheet .cutlist th {
+    position: static;
+  }
+
+  .print-sheet tr,
+  .print-sheet .cotes section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-sheet thead {
+    display: table-header-group;
+  }
 }
 
 .cutlist tbody tr { cursor: pointer; }

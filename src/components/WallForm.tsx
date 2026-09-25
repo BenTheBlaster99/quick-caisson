@@ -38,9 +38,10 @@ export function WallForm() {
           <li>Largeur de caisson : 300–1200 mm. La somme égale toujours la largeur du mur.</li>
           <li>Modifier une largeur prend sur le caisson de droite. Le dernier échange avec celui de gauche. Sinon, refus.</li>
           <li>La largeur du mur se règle depuis la droite, dans les mêmes limites. Ajouter coupe le plus large en deux. Retirer donne sa largeur au voisin.</li>
-          <li>Étagères réparties dans la zone libre. Tringle haute à 80 mm sous le dessus, basse à mi-hauteur intérieure. Tiroirs seuls : toute la hauteur. Sinon 200 mm chacun, en gardant de la place au-dessus.</li>
-          <li>Pantalonnière : une ligne d’accessoire, zone nominale 800 mm. Caisse de tiroir : profondeur − 50 mm, 20 mm plus basse que la façade, fond 8 mm. Pas de coulisses.</li>
-          <li>Battantes : 1 porte sous 600 mm, 2 à partir de 600 mm. Coulissantes : 2 vantaux si le mur fait moins de 2400 mm, sinon 3, sur tout le mur.</li>
+          <li>Étagères : un écart sous chaque tablette, égal par défaut. Elles restent au-dessus de la tringle et des tiroirs.</li>
+          <li>Tringle : vide dessous de 400 à 1600 mm, 900 par défaut. Haute à 80 mm sous le dessus. Basse au-dessus de ce vide.</li>
+          <li>Tiroirs : 16 ou 18 mm, caisse et façade. Une tablette ferme le dessus de la pile. Profondeur − 50 mm, 20 mm plus basse que la façade, fond 8 mm.</li>
+          <li>Portes par caisson : aucune, battante ou vitrée. Une porte sous 600 mm, deux à partir de 600 mm, sur la largeur du caisson.</li>
           <li>Chant visible : avant ou aucun. Ce n’est pas encore une règle de chant. Pas de trait de scie.</li>
         </ul>
       </details>

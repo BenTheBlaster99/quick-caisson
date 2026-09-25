@@ -1,10 +1,10 @@
 import { OrbitControls } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { doorCountForCaisson, layoutCaisson, slidingLeafCount, usableHeight } from '../domain/layout'
-import { BACK, PANEL, RAIL_DIAMETER, finishById, splitEven } from '../domain/rules'
-import type { CaissonLayout, PantoMark } from '../domain/layout'
-import type { Caisson, FinishId, FrontMode, Project } from '../domain/types'
+import { doorCountForCaisson, layoutCaisson, usableHeight } from '../domain/layout'
+import { BACK, PANEL, RAIL_DIAMETER, doorFinishById, finishById, splitEven } from '../domain/rules'
+import type { CaissonLayout } from '../domain/layout'
+import type { Caisson, FinishId, Project } from '../domain/types'
 
 type Rig = {
   target: { set: (x: number, y: number, z: number) => void }
@@ -109,7 +109,6 @@ function Furniture({
 }) {
   const color = finishById(project.finish).color
   const finish = project.finish
-  const boxHeight = usableHeight(project.wall)
   let cursor = 0
   const showContents = view === 'interior' || view === 'facade'
   const showDoors = view === 'facade'
@@ -133,7 +132,6 @@ function Furniture({
               wall={project.wall}
               color={color}
               finish={finish}
-              front={project.front}
               doorsOpen={doorsOpen}
               showContents={showContents}
               showDoors={showDoors}
@@ -144,17 +142,6 @@ function Furniture({
             />
           )
         })
-      )}
-      {showDoors && project.front === 'coulissantes' && (
-        <SlidingDoors
-          width={project.wall.width}
-          depth={project.wall.depth}
-          socle={project.wall.socle}
-          height={boxHeight}
-          color={color}
-          doorsOpen={doorsOpen}
-          highlight={highlight}
-        />
       )}
     </group>
   )
@@ -197,7 +184,6 @@ function CaissonMesh({
   wall,
   color,
   finish,
-  front,
   doorsOpen,
   showContents,
   showDoors,
@@ -212,7 +198,6 @@ function CaissonMesh({
   wall: Project['wall']
   color: string
   finish: FinishId
-  front: FrontMode
   doorsOpen: boolean
   showContents: boolean
   showDoors: boolean
@@ -255,6 +240,14 @@ function CaissonMesh({
           tone={tone('étagère', inner, layout.shelfDepth)}
         />
       ))}
+      {showContents && layout.closingShelf && (
+        <Panel
+          position={[PANEL + inner / 2, (layout.closingShelf.bottom + layout.closingShelf.top) / 2, BACK + layout.shelfDepth / 2]}
+          size={[inner, PANEL, layout.shelfDepth]}
+          color={color}
+          tone={tone('dessus tiroirs', inner, layout.shelfDepth)}
+        />
+      )}
       {showContents && layout.rails.map((rail) => (
         <mesh key={rail.kind} position={[PANEL + inner / 2, rail.axis, depth * 0.58]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[RAIL_DIAMETER / 2, RAIL_DIAMETER / 2, inner, 20]} />
@@ -262,11 +255,17 @@ function CaissonMesh({
         </mesh>
       ))}
       {showContents && <Drawers layout={layout} width={caisson.width} depth={depth} color={color} tone={(role, along, across) => tone(role, along, across)} />}
-      {showContents && layout.pantalonniere && (
-        <Pantalonniere mark={layout.pantalonniere} width={caisson.width} depth={depth} tone={tone('pantalonnière', inner, layout.drawerDepth)} />
-      )}
-      {showDoors && front === 'battantes' && (
-        <HingedDoors width={caisson.width} height={boxHeight} depth={depth} color={color} open={doorsOpen} caissonIndex={index} highlight={highlight} />
+      {showDoors && caisson.door !== 'aucune' && (
+        <HingedDoors
+          width={caisson.width}
+          height={boxHeight}
+          depth={depth}
+          color={doorFinishById(caisson.doorFinish).color}
+          glass={caisson.door === 'vitree' || caisson.doorFinish === 'verre'}
+          open={doorsOpen}
+          caissonIndex={index}
+          highlight={highlight}
+        />
       )}
       <mesh position={[caisson.width / 2, boxHeight / 2, depth + 40]} onClick={(event) => { event.stopPropagation(); onSelect() }}>
         <planeGeometry args={[caisson.width, boxHeight]} />
@@ -290,41 +289,42 @@ function Drawers({
   tone: (role: string, along: number, across: number) => PanelTone
 }) {
   const inner = layout.interiorWidth
-  const boxWidth = inner - 2 * PANEL
+  const board = layout.drawerThickness
+  const boxWidth = inner - 2 * board
   const boxDepth = layout.drawerDepth
-  const leftX = PANEL + PANEL / 2
-  const rightX = width - PANEL - PANEL / 2
-  const sideZ = depth - PANEL - boxDepth / 2
+  const leftX = PANEL + board / 2
+  const rightX = width - PANEL - board / 2
+  const sideZ = depth - board - boxDepth / 2
   return (
     <group>
       {layout.drawers.map((drawer, index) => {
         const boxBottom = drawer.bottom + (drawer.height - drawer.boxHeight) / 2
         const boxMidY = boxBottom + drawer.boxHeight / 2
-        const frontZ = depth - PANEL - PANEL / 2
-        const backZ = depth - PANEL - boxDepth + PANEL / 2
+        const frontZ = depth - board - board / 2
+        const backZ = depth - board - boxDepth + board / 2
         const showBox = tone('côté tiroir', boxDepth, drawer.boxHeight) === 'hot'
           || tone('devant tiroir', boxWidth, drawer.boxHeight) === 'hot'
           || tone('derrière tiroir', boxWidth, drawer.boxHeight) === 'hot'
-          || tone('fond tiroir', boxWidth, boxDepth - 2 * PANEL) === 'hot'
+          || tone('fond tiroir', boxWidth, boxDepth - 2 * board) === 'hot'
         return (
           <group key={index}>
             <Panel
-              position={[PANEL + inner / 2, drawer.bottom + drawer.height / 2, depth - PANEL / 2]}
-              size={[inner - 2, Math.max(8, drawer.height - 2), PANEL]}
+              position={[PANEL + inner / 2, drawer.bottom + drawer.height / 2, depth - board / 2]}
+              size={[inner - 2, Math.max(8, drawer.height - 2), board]}
               color={color}
               tone={tone('façade tiroir', inner, drawer.height)}
             />
             {showBox && (
               <group>
-                <Panel position={[leftX, boxMidY, sideZ]} size={[PANEL, drawer.boxHeight, boxDepth]} color={color} tone={tone('côté tiroir', boxDepth, drawer.boxHeight)} />
-                <Panel position={[rightX, boxMidY, sideZ]} size={[PANEL, drawer.boxHeight, boxDepth]} color={color} tone={tone('côté tiroir', boxDepth, drawer.boxHeight)} />
-                <Panel position={[width / 2, boxMidY, frontZ]} size={[boxWidth, drawer.boxHeight, PANEL]} color={color} tone={tone('devant tiroir', boxWidth, drawer.boxHeight)} />
-                <Panel position={[width / 2, boxMidY, backZ]} size={[boxWidth, drawer.boxHeight, PANEL]} color={color} tone={tone('derrière tiroir', boxWidth, drawer.boxHeight)} />
+                <Panel position={[leftX, boxMidY, sideZ]} size={[board, drawer.boxHeight, boxDepth]} color={color} tone={tone('côté tiroir', boxDepth, drawer.boxHeight)} />
+                <Panel position={[rightX, boxMidY, sideZ]} size={[board, drawer.boxHeight, boxDepth]} color={color} tone={tone('côté tiroir', boxDepth, drawer.boxHeight)} />
+                <Panel position={[width / 2, boxMidY, frontZ]} size={[boxWidth, drawer.boxHeight, board]} color={color} tone={tone('devant tiroir', boxWidth, drawer.boxHeight)} />
+                <Panel position={[width / 2, boxMidY, backZ]} size={[boxWidth, drawer.boxHeight, board]} color={color} tone={tone('derrière tiroir', boxWidth, drawer.boxHeight)} />
                 <Panel
                   position={[width / 2, boxBottom + BACK / 2, sideZ]}
-                  size={[boxWidth, BACK, Math.max(8, boxDepth - 2 * PANEL)]}
+                  size={[boxWidth, BACK, Math.max(8, boxDepth - 2 * board)]}
                   color={color}
-                  tone={tone('fond tiroir', boxWidth, boxDepth - 2 * PANEL)}
+                  tone={tone('fond tiroir', boxWidth, boxDepth - 2 * board)}
                 />
               </group>
             )}
@@ -335,31 +335,12 @@ function Drawers({
   )
 }
 
-function Pantalonniere({ mark, width, depth, tone }: { mark: PantoMark; width: number; depth: number; tone: PanelTone }) {
-  const x0 = PANEL + 28
-  const x1 = width - PANEL - 28
-  const y = mark.bottom + Math.min(70, mark.height * 0.15)
-  const z0 = 36
-  const z1 = depth - 36
-  const metal = '#8d939a'
-  const rods = 6
-  return (
-    <group>
-      <Bar position={[x0, y, (z0 + z1) / 2]} size={[14, 14, z1 - z0]} color={metal} tone={tone} />
-      <Bar position={[x1, y, (z0 + z1) / 2]} size={[14, 14, z1 - z0]} color={metal} tone={tone} />
-      {Array.from({ length: rods }, (_, index) => {
-        const z = z0 + ((z1 - z0) * index) / (rods - 1)
-        return <Bar key={z} position={[(x0 + x1) / 2, y, z]} size={[x1 - x0, 10, 10]} color={metal} tone={tone} />
-      })}
-    </group>
-  )
-}
-
 function HingedDoors({
   width,
   height,
   depth,
   color,
+  glass,
   open,
   caissonIndex,
   highlight,
@@ -368,6 +349,7 @@ function HingedDoors({
   height: number
   depth: number
   color: string
+  glass: boolean
   open: boolean
   caissonIndex: number
   highlight: PartPick | null
@@ -387,63 +369,13 @@ function HingedDoors({
               position={[hingeLeft ? doorWidth / 2 : -doorWidth / 2, 0, PANEL / 2]}
               size={[Math.max(8, doorWidth - 2), height - 2, PANEL]}
               color={color}
+              glass={glass}
               tone={pieceTone(highlight, caissonIndex, 'porte', height, doorWidth)}
             />
           </group>
         )
         cursor += doorWidth
         return node
-      })}
-    </group>
-  )
-}
-
-function SlidingDoors({
-  width,
-  depth,
-  socle,
-  height,
-  color,
-  doorsOpen,
-  highlight,
-}: {
-  width: number
-  depth: number
-  socle: number
-  height: number
-  color: string
-  doorsOpen: boolean
-  highlight: PartPick | null
-}) {
-  const count = slidingLeafCount(width)
-  const widths = splitEven(width, count)
-  const leftCount = Math.floor(count / 2)
-  let cursor = 0
-  const closedCenters = widths.map((leaf) => {
-    const center = cursor + leaf / 2
-    cursor += leaf
-    return center
-  })
-
-  return (
-    <group>
-      {widths.map((leaf, index) => {
-        const onLeft = index < leftCount
-        const stack = onLeft ? index : index - leftCount
-        const parked = onLeft ? -leaf / 2 - 12 : width + leaf / 2 + 12
-        return (
-          <Panel
-            key={`${index}-${leaf}`}
-            position={[
-              doorsOpen ? parked : closedCenters[index],
-              socle + height / 2,
-              depth + PANEL / 2 + 2 + (doorsOpen ? stack * (PANEL + 10) : 0),
-            ]}
-            size={[leaf - 2, height - 2, PANEL]}
-            color={color}
-            tone={pieceTone(highlight, 1000, 'vantail', height, leaf)}
-          />
-        )
       })}
     </group>
   )
@@ -480,6 +412,7 @@ function Panel({
   selected = false,
   focus = false,
   tone = 'plain',
+  glass = false,
 }: {
   position: [number, number, number]
   size: [number, number, number]
@@ -487,6 +420,7 @@ function Panel({
   selected?: boolean
   focus?: boolean
   tone?: PanelTone
+  glass?: boolean
 }) {
   const hot = tone === 'hot' || (tone === 'plain' && selected)
   return (
@@ -494,39 +428,12 @@ function Panel({
       <boxGeometry args={size} />
       <meshStandardMaterial
         color={tone === 'hot' ? '#f4fff9' : color}
-        roughness={0.62}
-        metalness={0.02}
-        transparent={tone === 'dim'}
-        opacity={tone === 'dim' ? 0.14 : 1}
+        roughness={glass ? 0.08 : 0.62}
+        metalness={glass ? 0.05 : 0.02}
+        transparent={glass || tone === 'dim'}
+        opacity={tone === 'dim' ? 0.14 : glass ? 0.38 : 1}
         emissive={hot ? '#1d4a42' : '#000000'}
         emissiveIntensity={tone === 'hot' ? 0.62 : hot ? (focus ? 0.5 : 0.22) : 0}
-      />
-    </mesh>
-  )
-}
-
-function Bar({
-  position,
-  size,
-  color,
-  tone = 'plain',
-}: {
-  position: [number, number, number]
-  size: [number, number, number]
-  color: string
-  tone?: PanelTone
-}) {
-  return (
-    <mesh position={position}>
-      <boxGeometry args={size} />
-      <meshStandardMaterial
-        color={tone === 'hot' ? '#f4fff9' : color}
-        metalness={0.6}
-        roughness={0.32}
-        transparent={tone === 'dim'}
-        opacity={tone === 'dim' ? 0.14 : 1}
-        emissive={tone === 'hot' ? '#1d4a42' : '#000000'}
-        emissiveIntensity={tone === 'hot' ? 0.62 : 0}
       />
     </mesh>
   )

@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { addCaisson, redistribute, removeCaisson, setCaissonWidth, sumWidths } from './caissons'
 import { buildCutList, formatCutCell } from './cutlist'
-import { layoutCaisson, slidingLeafCount, usableHeight } from './layout'
-import { defaultProject, parseProject, serializeProject } from './project'
+import { applyShelfGap, layoutCaisson, usableHeight } from './layout'
+import { defaultProject, parseProject, serializeProject, setWallField } from './project'
 import type { Caisson, Project } from './types'
 
 function project(partial: Partial<Project> & Pick<Project, 'wall' | 'caissons'>): Project {
   return {
     format: 'caisson-project',
     version: 1,
-    front: 'aucune',
     finish: 'blanc',
     ...partial,
   }
@@ -20,8 +19,13 @@ function box(id: string, width: number, extra: Partial<Caisson> = {}): Caisson {
     id,
     width,
     shelves: 0,
+    shelfGaps: [],
     rail: 'aucune',
+    hangingGap: 900,
     drawers: 0,
+    drawerThickness: 18,
+    door: 'aucune',
+    doorFinish: 'blanc',
     pantalonniere: false,
     ...extra,
   }
@@ -138,11 +142,25 @@ describe('interiors', () => {
     expect(layout.rails.map((rail) => rail.axis)).toEqual([1702])
   })
 
-  it('fills a drawers-only column', () => {
+  it('fills a drawers-only column and closes it with a shelf', () => {
     const layout = layoutCaisson(wall, box('a', 1000, { drawers: 2 }))
-    expect(layout.drawers.map((drawer) => drawer.height)).toEqual([882, 882])
-    expect(layout.drawers[1].bottom).toBe(18 + 882)
-    expect(layout.drawers[0].boxHeight).toBe(862)
+    expect(layout.drawers.map((drawer) => drawer.height)).toEqual([873, 873])
+    expect(layout.drawers[1].bottom).toBe(18 + 873)
+    expect(layout.drawers[0].boxHeight).toBe(853)
+    expect(layout.closingShelf).toEqual({ bottom: 1764, top: 1782 })
+  })
+
+  it('puts shelves only above the hanging gap', () => {
+    const layout = layoutCaisson(wall, box('a', 1000, { rail: 'basse', hangingGap: 900, shelves: 2 }))
+    expect(layout.rails[0].axis).toBe(18 + 900)
+    expect(layout.shelves.length).toBe(2)
+    expect(layout.shelves.every((shelf) => shelf.bottom > layout.rails[0].axis)).toBe(true)
+  })
+
+  it('refuses a shelf gap that does not fit', () => {
+    const caisson = box('a', 1000, { shelves: 2, shelfGaps: [100, 100] })
+    const refused = applyShelfGap(wall, caisson, 0, 5000)
+    expect(refused.ok).toBe(false)
   })
 
   it('keeps a free zone when shelves share the column with drawers', () => {
@@ -168,9 +186,8 @@ describe('cut list', () => {
     const rows = buildCutList(
       project({
         wall,
-        front: 'battantes',
         finish: 'blanc',
-        caissons: [box('a', 1000, { shelves: 2, rail: 'haute' })],
+        caissons: [box('a', 1000, { shelves: 2, rail: 'haute', door: 'battante' })],
       }),
     )
 
@@ -193,8 +210,7 @@ describe('cut list', () => {
     const rows = buildCutList(
       project({
         wall: { width: 1100, height: 2000, depth: 400, socle: 0, ceilingGap: 0 },
-        front: 'battantes',
-        caissons: [box('a', 500), box('b', 600)],
+        caissons: [box('a', 500, { door: 'battante' }), box('b', 600, { door: 'battante' })],
       }),
     )
     const doors = rows.filter((row) => row.role === 'porte')
@@ -205,20 +221,37 @@ describe('cut list', () => {
     expect(rows.some((row) => row.role === 'socle avant')).toBe(false)
   })
 
-  it('spans sliding leaves across the wall', () => {
-    expect(slidingLeafCount(2399)).toBe(2)
-    expect(slidingLeafCount(2400)).toBe(3)
+  it('sizes each caisson door from that caisson, not from the wall', () => {
     const rows = buildCutList(
       project({
-        wall: { ...wall, width: 2400 },
-        front: 'coulissantes',
-        caissons: [box('a', 1200), box('b', 1200)],
+        wall: { width: 3000, height: 2500, depth: 600, socle: 0, ceilingGap: 0 },
+        finish: 'blanc',
+        caissons: [
+          box('a', 600, { door: 'battante', doorFinish: 'chene' }),
+          box('b', 1000, { rail: 'basse', hangingGap: 900, shelves: 2, door: 'aucune' }),
+          box('c', 300, { door: 'aucune' }),
+          box('d', 1100, { drawers: 3, drawerThickness: 16, door: 'aucune' }),
+        ],
       }),
     )
-    expect(rows.filter((row) => row.role === 'porte')).toHaveLength(0)
-    expect(rows.filter((row) => row.role === 'vantail')).toEqual([
-      expect.objectContaining({ caisson: 'mur', quantity: 3, width: 800, length: 1800 }),
+    const doors = rows.filter((row) => row.role === 'porte')
+    expect(doors).toEqual([
+      expect.objectContaining({ caisson: '1', quantity: 2, length: 2500, width: 300, material: 'Chêne' }),
     ])
+    expect(rows.some((row) => row.role === 'vantail')).toBe(false)
+    const hung = layoutCaisson(
+      { width: 3000, height: 2500, depth: 600, socle: 0, ceilingGap: 0 },
+      box('b', 1000, { rail: 'basse', hangingGap: 900, shelves: 2 }),
+    )
+    expect(hung.shelves.every((shelf) => shelf.bottom > hung.rails[0].axis)).toBe(true)
+    const drawers = layoutCaisson(
+      { width: 3000, height: 2500, depth: 600, socle: 0, ceilingGap: 0 },
+      box('d', 1100, { drawers: 3, drawerThickness: 16 }),
+    )
+    expect(drawers.closingShelf).not.toBeNull()
+    expect(rows.find((row) => row.caisson === '4' && row.role === 'dessus tiroirs')).toMatchObject({ quantity: 1, thickness: 18 })
+    expect(rows.find((row) => row.caisson === '4' && row.role === 'façade tiroir')).toMatchObject({ thickness: 16 })
+    expect(rows.find((row) => row.caisson === '4' && row.role === 'côté tiroir')).toMatchObject({ thickness: 16 })
   })
 
   it('lists a drawer front and a simple box', () => {
@@ -231,15 +264,16 @@ describe('cut list', () => {
     expect(rows.find((row) => row.role === 'façade tiroir')).toMatchObject({
       quantity: 2,
       length: 964,
-      width: 882,
+      width: 873,
       thickness: 18,
     })
     expect(rows.find((row) => row.role === 'côté tiroir')).toMatchObject({
       quantity: 4,
-      length: 862,
+      length: 853,
       width: 350,
       thickness: 18,
     })
+    expect(rows.find((row) => row.role === 'dessus tiroirs')).toMatchObject({ quantity: 1, thickness: 18 })
     expect(rows.find((row) => row.role === 'fond tiroir')).toMatchObject({
       quantity: 2,
       length: 928,
@@ -266,12 +300,10 @@ describe('cut list', () => {
     const wideLeaf = buildCutList(
       project({
         wall: { width: 6000, height: 1800, depth: 700, socle: 0, ceilingGap: 0 },
-        front: 'coulissantes',
-        caissons: [box('a', 1200), box('b', 1200), box('c', 1200), box('d', 1200), box('e', 1200)],
+        caissons: [box('a', 1200), box('b', 1200), box('c', 1200), box('d', 1200), box('e', 1200, { door: 'battante' })],
       }),
     )
-    const leaf = wideLeaf.find((row) => row.role === 'vantail')
-    expect(leaf).toMatchObject({ length: 2000, width: 1800 })
+    expect(wideLeaf.find((row) => row.role === 'porte')).toMatchObject({ length: 1800, width: 600 })
 
     const deep = buildCutList(
       project({
@@ -288,20 +320,38 @@ describe('cut list', () => {
     }
   })
 
-  it('lists a pantalonnière as one accessory line', () => {
-    const rows = buildCutList(
-      project({
+  it('keeps a saved pantalonnière without showing the part', () => {
+    const saved = project({
+      wall,
+      caissons: [box('a', 1000, { pantalonniere: true })],
+    })
+    expect(buildCutList(saved).some((row) => row.role === 'pantalonnière')).toBe(false)
+    expect(parseProject(serializeProject(saved)).caissons[0].pantalonniere).toBe(true)
+  })
+
+  it('still opens an old file that chose one front for the wall', () => {
+    const opened = parseProject(
+      JSON.stringify({
+        format: 'caisson-project',
+        version: 1,
         wall,
-        caissons: [box('a', 1000, { pantalonniere: true })],
+        front: 'battantes',
+        finish: 'blanc',
+        caissons: [
+          {
+            id: 'a',
+            width: 1000,
+            shelves: 0,
+            rail: 'aucune',
+            drawers: 0,
+            pantalonniere: false,
+          },
+        ],
       }),
     )
-    expect(rows.find((row) => row.role === 'pantalonnière')).toMatchObject({
-      quantity: 1,
-      length: 964,
-      width: 350,
-      thickness: null,
-      edges: '—',
-    })
+    expect(opened.caissons[0].door).toBe('battante')
+    expect(opened.caissons[0].hangingGap).toBe(900)
+    expect(opened.caissons[0].drawerThickness).toBe(18)
   })
 })
 
@@ -309,6 +359,12 @@ describe('project file', () => {
   it('round-trips the default project', () => {
     const current = defaultProject()
     expect(parseProject(serializeProject(current))).toEqual(current)
+  })
+
+  it('accepts a wall up to 3600 mm high', () => {
+    const current = defaultProject()
+    expect(setWallField(current, 'height', 3600).ok).toBe(true)
+    expect(setWallField(current, 'height', 3601).ok).toBe(false)
   })
 
   it('rejects a file whose caissons do not sum to the wall', () => {

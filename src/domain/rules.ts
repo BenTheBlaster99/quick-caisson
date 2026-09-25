@@ -1,6 +1,6 @@
-import type { FinishId } from './types'
+import type { DoorFinishId, FinishId } from './types'
 
-/** Carcass, shelves, doors, drawer fronts and drawer boxes. */
+/** Carcass, shelves, and solid doors. Drawer fronts and boxes use their own thickness. */
 export const PANEL = 18
 /** Back panel and drawer bottom. */
 export const BACK = 8
@@ -24,11 +24,14 @@ export const MIN_FREE = 280
 /** Nominal pull-out zone for a pantalonnière. */
 export const PANTO_ZONE = 800
 export const DOOR_SPLIT = 600
-export const SLIDING_SPLIT = 2400
+export const HANGING_MIN = 400
+export const HANGING_MAX = 1600
+export const HANGING_DEFAULT = 900
+export const DRAWER_THICKNESSES = [16, 18] as const
 
 export const LIMITS = {
   width: { min: 600, max: 6000, label: 'Largeur' },
-  height: { min: 1800, max: 2800, label: 'Hauteur' },
+  height: { min: 1800, max: 3600, label: 'Hauteur' },
   depth: { min: 300, max: 700, label: 'Profondeur' },
   socle: { min: 0, max: 200, label: 'Socle' },
   ceilingGap: { min: 0, max: 300, label: 'Jeu au plafond' },
@@ -42,8 +45,17 @@ export const FINISHES: { id: FinishId; name: string; color: string }[] = [
   { id: 'anthracite', name: 'Anthracite', color: '#3e4246' },
 ]
 
+export const DOOR_FINISHES: { id: DoorFinishId; name: string; color: string }[] = [
+  ...FINISHES,
+  { id: 'verre', name: 'verre', color: '#d5ebe8' },
+]
+
 export function finishById(id: FinishId) {
   return FINISHES.find((finish) => finish.id === id) ?? FINISHES[0]
+}
+
+export function doorFinishById(id: DoorFinishId) {
+  return DOOR_FINISHES.find((finish) => finish.id === id) ?? DOOR_FINISHES[0]
 }
 
 export function splitEven(total: number, count: number): number[] {

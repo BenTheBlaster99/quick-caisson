@@ -1,10 +1,12 @@
 import { redistribute, sumWidths, wallResizeError, wallWidthRange } from './caissons'
-import { LIMITS, type WallField } from './rules'
-import type { Caisson, FinishId, FrontMode, Project, RailMode, Wall } from './types'
+import { applyShelfCount } from './layout'
+import { HANGING_DEFAULT, HANGING_MAX, HANGING_MIN, LIMITS, type WallField } from './rules'
+import type { Caisson, DoorFinishId, DoorMode, DrawerThickness, FinishId, Project, RailMode, Wall } from './types'
 
 const RAILS: RailMode[] = ['aucune', 'haute', 'basse', 'double']
-const FRONTS: FrontMode[] = ['aucune', 'battantes', 'coulissantes']
+const DOORS: DoorMode[] = ['aucune', 'battante', 'vitree']
 const FINISHES: FinishId[] = ['blanc', 'chene', 'anthracite']
+const DOOR_FINISHES: DoorFinishId[] = ['blanc', 'chene', 'anthracite', 'verre']
 
 export function createId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -14,38 +16,44 @@ export function createId(): string {
 }
 
 export function defaultProject(): Project {
+  const wall: Wall = {
+    width: 3200,
+    height: 2500,
+    depth: 600,
+    socle: 80,
+    ceilingGap: 20,
+  }
+  const seeds = [
+    caisson('c1', 800, { shelves: 5 }),
+    caisson('c2', 800, { rail: 'double' }),
+    caisson('c3', 800, { drawers: 4 }),
+    caisson('c4', 800, { shelves: 1, drawers: 2, pantalonniere: true }),
+  ]
   return {
     format: 'caisson-project',
     version: 1,
-    wall: {
-      width: 3200,
-      height: 2500,
-      depth: 600,
-      socle: 80,
-      ceilingGap: 20,
-    },
-    front: 'battantes',
+    wall,
     finish: 'chene',
-    caissons: [
-      caisson('c1', 800, { shelves: 5 }),
-      caisson('c2', 800, { rail: 'double' }),
-      caisson('c3', 800, { drawers: 4 }),
-      caisson('c4', 800, { shelves: 1, drawers: 2, pantalonniere: true }),
-    ],
+    caissons: seeds.map((item) => applyShelfCount(wall, item, item.shelves)),
   }
 }
 
 function caisson(
   id: string,
   width: number,
-  options: Partial<Pick<Caisson, 'shelves' | 'rail' | 'drawers' | 'pantalonniere'>> = {},
+  options: Partial<Pick<Caisson, 'shelves' | 'rail' | 'drawers' | 'pantalonniere' | 'door' | 'doorFinish' | 'drawerThickness' | 'hangingGap'>> = {},
 ): Caisson {
   return {
     id,
     width,
     shelves: options.shelves ?? 0,
+    shelfGaps: [],
     rail: options.rail ?? 'aucune',
+    hangingGap: options.hangingGap ?? HANGING_DEFAULT,
     drawers: options.drawers ?? 0,
+    drawerThickness: options.drawerThickness ?? 18,
+    door: options.door ?? 'battante',
+    doorFinish: options.doorFinish ?? 'chene',
     pantalonniere: options.pantalonniere ?? false,
   }
 }
@@ -106,27 +114,27 @@ export function parseProject(text: string): Project {
   try {
     data = JSON.parse(text)
   } catch {
-    throw new Error("Ce fichier n'est pas du JSON.")
+    throw new Error('Ce fichier ne peut pas être lu.')
   }
   if (!isRecord(data)) throw new Error('Fichier illisible.')
   if (data.format !== 'caisson-project' || data.version !== 1) {
-    throw new Error('Ce JSON n’est pas un projet Caisson (version 1).')
+    throw new Error("Ce fichier n'est pas un projet Caisson.")
   }
 
   const wall = readWall(data.wall)
-  const front = readEnum(data.front, FRONTS, 'Façade inconnue.')
   const finish = readEnum(data.finish, FINISHES, 'Finition inconnue.')
+  const legacyDoor = legacyDoorMode(data.front)
   if (!Array.isArray(data.caissons) || data.caissons.length === 0) {
     throw new Error('Le projet doit contenir au moins un caisson.')
   }
 
-  const caissons = data.caissons.map((item, index) => readCaisson(item, index))
+  const caissons = data.caissons.map((item, index) => readCaisson(item, index, wall, finish, legacyDoor))
   const total = sumWidths(caissons.map((item) => item.width))
   if (total !== wall.width) {
     throw new Error(`La somme des caissons (${total} mm) ne vaut pas la largeur du mur (${wall.width} mm).`)
   }
 
-  return { format: 'caisson-project', version: 1, wall, front, finish, caissons }
+  return { format: 'caisson-project', version: 1, wall, finish, caissons }
 }
 
 function readWall(value: unknown): Wall {
@@ -148,7 +156,19 @@ function readLimit(value: unknown, field: WallField): number {
   return value as number
 }
 
-function readCaisson(value: unknown, index: number): Caisson {
+function legacyDoorMode(value: unknown): DoorMode {
+  if (value === 'aucune') return 'aucune'
+  if (value === 'battantes' || value === 'coulissantes') return 'battante'
+  return 'battante'
+}
+
+function readCaisson(
+  value: unknown,
+  index: number,
+  wall: Wall,
+  carcass: FinishId,
+  legacyDoor: DoorMode,
+): Caisson {
   if (!isRecord(value)) throw new Error(`Caisson ${index + 1} illisible.`)
   const id = typeof value.id === 'string' && value.id.trim() ? value.id : `c${index + 1}`
   const width = value.width
@@ -163,17 +183,53 @@ function readCaisson(value: unknown, index: number): Caisson {
   if (!Number.isInteger(drawers) || (drawers as number) < 0 || (drawers as number) > 6) {
     throw new Error(`Caisson ${index + 1} : tiroirs hors 0–6.`)
   }
-  if (typeof value.pantalonniere !== 'boolean') {
-    throw new Error(`Caisson ${index + 1} : pantalonnière oui/non manquante.`)
-  }
-  return {
+  const pantalonniere = typeof value.pantalonniere === 'boolean' ? value.pantalonniere : false
+  const door = value.door === undefined ? legacyDoor : readEnum(value.door, DOORS, `Caisson ${index + 1} : porte inconnue.`)
+  const doorFinish =
+    value.doorFinish === undefined
+      ? carcass
+      : readEnum(value.doorFinish, DOOR_FINISHES, `Caisson ${index + 1} : finition de porte inconnue.`)
+  const hangingGap = readHanging(value.hangingGap)
+  const drawerThickness = readDrawerThickness(value.drawerThickness)
+  const base: Caisson = {
     id,
     width: width as number,
     shelves: shelves as number,
-    drawers: drawers as number,
+    shelfGaps: [],
     rail: readEnum(value.rail, RAILS, `Caisson ${index + 1} : tringle inconnue.`),
-    pantalonniere: value.pantalonniere,
+    hangingGap,
+    drawers: drawers as number,
+    drawerThickness,
+    door,
+    doorFinish,
+    pantalonniere,
   }
+  const gaps = readShelfGaps(value.shelfGaps, shelves as number)
+  if (!gaps) return applyShelfCount(wall, base, shelves as number)
+  return { ...base, shelfGaps: gaps }
+}
+
+function readHanging(value: unknown): number {
+  if (value === undefined) return HANGING_DEFAULT
+  if (!Number.isInteger(value) || (value as number) < HANGING_MIN || (value as number) > HANGING_MAX) {
+    throw new Error(`Vide sous la tringle hors ${HANGING_MIN}–${HANGING_MAX} mm.`)
+  }
+  return value as number
+}
+
+function readDrawerThickness(value: unknown): DrawerThickness {
+  if (value === undefined || value === 18) return 18
+  if (value === 16) return 16
+  throw new Error('Épaisseur des tiroirs : 16 ou 18 mm.')
+}
+
+function readShelfGaps(value: unknown, shelves: number): number[] | null {
+  if (value === undefined) return null
+  if (!Array.isArray(value) || value.length !== shelves) return null
+  if (!value.every((gap) => Number.isInteger(gap) && (gap as number) >= 0)) {
+    throw new Error('Écarts d’étagères illisibles.')
+  }
+  return value as number[]
 }
 
 function readEnum<T extends string>(value: unknown, allowed: readonly T[], message: string): T {

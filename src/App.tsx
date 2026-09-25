@@ -4,6 +4,7 @@ import { CutListTable } from './components/CutListTable'
 import { ElementForm, FacadeForm } from './components/ElementForm'
 import { Elevation } from './components/Elevation'
 import { Scene, type PartPick, type SceneView } from './components/Scene'
+import { PrintSheet } from './components/PrintSheet'
 import { Toolbar } from './components/Toolbar'
 import { WallForm } from './components/WallForm'
 import { cutRowKey } from './domain/cutlist'
@@ -17,8 +18,6 @@ const STEPS = [
   { id: 'facade', label: 'La façade' },
   { id: 'liste', label: 'La liste' },
 ] as const
-
-const NEXT = ['Les caissons', "L'intérieur", 'La façade', 'La liste']
 
 function stepFromHash(): number {
   const id = window.location.hash.replace('#', '')
@@ -56,9 +55,10 @@ export function App() {
   }
 
   const sceneView: SceneView =
-    current.id === 'mur' ? 'envelope' : current.id === 'caissons' ? 'boxes' : current.id === 'interieur' ? 'interior' : 'facade'
+    current.id === 'mur' ? 'envelope' : current.id === 'caissons' ? 'boxes' : 'facade'
 
   return (
+    <>
     <div className="app">
       <Toolbar />
       <nav className="steps" aria-label="Étapes">
@@ -99,7 +99,7 @@ export function App() {
                   <Scene
                     project={project}
                     selectedId={selected.id}
-                    doorsOpen={part != null && part.role !== 'porte' && part.role !== 'vantail' ? true : doorsOpen}
+                    doorsOpen={part != null && part.role !== 'porte' ? true : doorsOpen}
                     frameToken={frameToken}
                     view="facade"
                     onSelect={select}
@@ -124,7 +124,7 @@ export function App() {
               <span className="hint">
                 {current.id === 'mur' ? 'Le volume du mur' : 'Glisser pour tourner. Cliquer un caisson pour le choisir.'}
               </span>
-              {current.id === 'facade' && project.front !== 'aucune' && (
+              {(current.id === 'facade' || current.id === 'interieur') && project.caissons.some((caisson) => caisson.door !== 'aucune') && (
                 <button type="button" className="secondary" onClick={toggleDoors}>
                   {doorsOpen ? 'Fermer les façades' : 'Ouvrir les façades'}
                 </button>
@@ -145,15 +145,9 @@ export function App() {
           </section>
         </main>
       )}
-      <footer className="step-footer">
-        <button type="button" className="secondary" onClick={() => go(step - 1)} disabled={step === 0}>
-          Retour
-        </button>
-        <button type="button" className="primary" onClick={() => go(step + 1)} disabled={step === STEPS.length - 1}>
-          {step < NEXT.length ? `Continuer · ${NEXT[step]}` : 'Continuer'}
-        </button>
-      </footer>
     </div>
+    <PrintSheet project={project} selectedId={selected.id} />
+    </>
   )
 }
 

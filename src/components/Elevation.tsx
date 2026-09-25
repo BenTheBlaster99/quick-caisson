@@ -1,4 +1,4 @@
-import { layoutProject, slidingLeafCount, usableHeight } from '../domain/layout'
+import { layoutProject, usableHeight } from '../domain/layout'
 import { doorCountForCaisson } from '../domain/layout'
 import { finishById, splitEven } from '../domain/rules'
 import type { Project } from '../domain/types'
@@ -7,10 +7,12 @@ export function Elevation({
   project,
   selectedId,
   onSelect,
+  listed = false,
 }: {
   project: Project
   selectedId: string
   onSelect: (id: string) => void
+  listed?: boolean
 }) {
   const wall = project.wall
   const layouts = layoutProject(project)
@@ -89,15 +91,15 @@ export function Elevation({
                   fill="none"
                 />
               ))}
-              {layout.pantalonniere && (
-                <text
-                  className="label"
-                  x={xOf(start + caisson.width / 2)}
-                  y={yOf(wall.socle + layout.pantalonniere.bottom + layout.pantalonniere.height / 2)}
-                  textAnchor="middle"
-                >
-                  pantalonnière
-                </text>
+              {layout.closingShelf && (
+                <line
+                  className="drawing"
+                  x1={xOf(start + 18)}
+                  x2={xOf(start + caisson.width - 18)}
+                  y1={yOf(wall.socle + layout.closingShelf.top)}
+                  y2={yOf(wall.socle + layout.closingShelf.top)}
+                  strokeWidth={2.5}
+                />
               )}
               {layout.shelves.map((shelf, shelfIndex) => (
                 <line
@@ -122,7 +124,7 @@ export function Elevation({
                   strokeDasharray="5 3"
                 />
               ))}
-              {project.front === 'battantes' &&
+              {caisson.door !== 'aucune' &&
                 splitEven(caisson.width, doorCountForCaisson(caisson.width)).slice(0, -1).map((_, doorIndex, doors) => {
                   const at = start + doors.slice(0, doorIndex + 1).reduce((sum, width) => sum + width, 0)
                   return (
@@ -146,21 +148,6 @@ export function Elevation({
             </g>
           )
         })}
-        {project.front === 'coulissantes' &&
-          splitEven(wall.width, slidingLeafCount(wall.width)).slice(0, -1).map((_, leafIndex, leaves) => {
-            const at = leaves.slice(0, leafIndex + 1).reduce((sum, width) => sum + width, 0)
-            return (
-              <line
-                key={`leaf-${leafIndex}`}
-                x1={xOf(at)}
-                x2={xOf(at)}
-                y1={yOf(wall.socle)}
-                y2={yOf(wall.socle + boxHeight)}
-                stroke="#1d4a42"
-                strokeDasharray="7 4"
-              />
-            )
-          })}
         <DimH x1={xOf(0)} x2={xOf(wall.width)} y={originY + 44} label={String(wall.width)} />
         <DimV x={originX - 28} y1={yOf(0)} y2={yOf(wall.height)} label={String(wall.height)} />
         {marks.map((mark) => (
@@ -178,13 +165,27 @@ export function Elevation({
           </g>
         ))}
       </svg>
-      <ul className="cotes">
-        {marks.length === 0 && <li>Ce caisson n’a ni étagère ni tringle.</li>}
-        {marks.map((mark) => (
-          <li key={`${mark.y}-${mark.text}`}>{mark.text}</li>
-        ))}
-      </ul>
-      <figcaption>Cotes en mm depuis le sol. Étagère : dessus du panneau. Tringle : axe.</figcaption>
+      <div className="cotes">
+        {(listed ? columns : [columns[selected]].filter((column) => column !== undefined)).map((column) => {
+          const lines = marksFor(wall.socle, column.layout)
+          if (lines.length === 0) {
+            return listed ? null : <p key={column.caisson.id}>Ce caisson n’a ni étagère ni tringle.</p>
+          }
+          return (
+            <section key={column.caisson.id}>
+              <h3>Caisson {column.index + 1}</h3>
+              <ul>
+                {lines.map((mark) => (
+                  <li key={`${mark.y}-${mark.text}`}>{mark.text}</li>
+                ))}
+              </ul>
+            </section>
+          )
+        })}
+        {listed && columns.every(({ layout }) => marksFor(wall.socle, layout).length === 0) && (
+          <p>Aucune étagère ni tringle.</p>
+        )}
+      </div>
     </figure>
   )
 }
@@ -194,13 +195,14 @@ function marksFor(socle: number, layout: ReturnType<typeof layoutProject>[number
   const marks: { y: number; text: string }[] = []
   layout.shelves.forEach((shelf, index) => {
     const y = Math.round(socle + shelf.top)
-    marks.push({ y, text: `${y} étagère ${index + 1}` })
+    marks.push({ y, text: `Étagère ${index + 1}, en partant du bas : le dessus est à ${y} mm du sol` })
   })
   for (const rail of layout.rails) {
     const y = Math.round(socle + rail.axis)
-    marks.push({ y, text: `${y} tringle ${rail.kind}` })
+    const place = rail.kind === 'haute' ? 'haute' : 'basse'
+    marks.push({ y, text: `Tringle ${place} : l’axe est à ${y} mm du sol` })
   }
-  return marks.sort((a, b) => b.y - a.y)
+  return marks.sort((a, b) => a.y - b.y)
 }
 
 function DimH({ x1, x2, y, label }: { x1: number; x2: number; y: number; label: string }) {
