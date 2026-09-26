@@ -1,4 +1,4 @@
-import { finishById } from '../domain/rules'
+import { MAX_CAISSON, MIN_CAISSON, finishById } from '../domain/rules'
 import { useProject } from '../state/project-context'
 import { MmField } from './MmField'
 
@@ -38,6 +38,8 @@ export function CaissonColumn() {
         <MmField
           label={`Largeur du caisson ${index + 1}`}
           value={selected.width}
+          min={MIN_CAISSON}
+          max={MAX_CAISSON}
           hint={widthHint}
           onCommit={setWidth}
         />

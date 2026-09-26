@@ -1,6 +1,7 @@
 import { OrbitControls } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
+import { DoubleSide } from 'three'
 import { doorCountForCaisson, layoutCaisson, usableHeight } from '../domain/layout'
 import { BACK, PANEL, RAIL_DIAMETER, doorFinishById, finishById, splitEven } from '../domain/rules'
 import type { CaissonLayout } from '../domain/layout'
@@ -365,19 +366,98 @@ function HingedDoors({
         const angle = open ? (hingeLeft ? -1.15 : 1.15) : 0
         const node = (
           <group key={`${hingeX}-${doorWidth}`} position={[hingeX, height / 2, depth + 1]} rotation={[0, angle, 0]}>
-            <Panel
-              position={[hingeLeft ? doorWidth / 2 : -doorWidth / 2, 0, PANEL / 2]}
-              size={[Math.max(8, doorWidth - 2), height - 2, PANEL]}
-              color={color}
-              glass={glass}
-              tone={pieceTone(highlight, caissonIndex, 'porte', height, doorWidth)}
-            />
+            {glass ? (
+              <GlassLeaf
+                width={Math.max(8, doorWidth - 2)}
+                height={height - 2}
+                hingeLeft={hingeLeft}
+                tone={pieceTone(highlight, caissonIndex, 'porte', height, doorWidth)}
+              />
+            ) : (
+              <Panel
+                position={[hingeLeft ? doorWidth / 2 : -doorWidth / 2, 0, PANEL / 2]}
+                size={[Math.max(8, doorWidth - 2), height - 2, PANEL]}
+                color={color}
+                tone={pieceTone(highlight, caissonIndex, 'porte', height, doorWidth)}
+              />
+            )}
           </group>
         )
         cursor += doorWidth
         return node
       })}
     </group>
+  )
+}
+
+function GlassLeaf({
+  width,
+  height,
+  hingeLeft,
+  tone,
+}: {
+  width: number
+  height: number
+  hingeLeft: boolean
+  tone: PanelTone
+}) {
+  const frame = Math.min(36, width / 6, height / 10)
+  const innerW = Math.max(8, width - frame * 2)
+  const innerH = Math.max(8, height - frame * 2)
+  const x = hingeLeft ? width / 2 : -width / 2
+  const dim = tone === 'dim'
+  const rim = 10
+  return (
+    <group position={[x, 0, 0]}>
+      <FrameBar position={[-width / 2 + frame / 2, 0, PANEL / 2]} size={[frame, height, PANEL]} dim={dim} />
+      <FrameBar position={[width / 2 - frame / 2, 0, PANEL / 2]} size={[frame, height, PANEL]} dim={dim} />
+      <FrameBar position={[0, height / 2 - frame / 2, PANEL / 2]} size={[innerW, frame, PANEL]} dim={dim} />
+      <FrameBar position={[0, -height / 2 + frame / 2, PANEL / 2]} size={[innerW, frame, PANEL]} dim={dim} />
+      <mesh position={[0, 0, PANEL / 2]} renderOrder={2}>
+        <boxGeometry args={[innerW, innerH, 8]} />
+        <meshPhysicalMaterial
+          color="#d7eef3"
+          roughness={0.04}
+          metalness={0}
+          transmission={dim ? 0.2 : 0.86}
+          thickness={0.08}
+          ior={1.5}
+          transparent
+          opacity={dim ? 0.12 : 0.55}
+          depthWrite={false}
+          side={DoubleSide}
+        />
+      </mesh>
+      <mesh position={[-innerW / 2 + rim / 2, 0, PANEL + 5]} renderOrder={3}>
+        <planeGeometry args={[rim, innerH]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={dim ? 0.08 : 0.45} depthWrite={false} />
+      </mesh>
+      <mesh position={[innerW / 2 - rim / 2, 0, PANEL + 5]} renderOrder={3}>
+        <planeGeometry args={[rim, innerH]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={dim ? 0.05 : 0.22} depthWrite={false} />
+      </mesh>
+      <mesh position={[0, innerH * 0.22, PANEL + 6]} rotation={[0, 0, -0.42]} renderOrder={4}>
+        <planeGeometry args={[innerW * 0.42, Math.max(18, innerH * 0.07)]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={dim ? 0.04 : 0.38} depthWrite={false} />
+      </mesh>
+    </group>
+  )
+}
+
+function FrameBar({
+  position,
+  size,
+  dim,
+}: {
+  position: [number, number, number]
+  size: [number, number, number]
+  dim: boolean
+}) {
+  return (
+    <mesh position={position}>
+      <boxGeometry args={size} />
+      <meshStandardMaterial color="#e7eef0" metalness={0.72} roughness={0.22} transparent={dim} opacity={dim ? 0.2 : 1} />
+    </mesh>
   )
 }
 
@@ -412,7 +492,6 @@ function Panel({
   selected = false,
   focus = false,
   tone = 'plain',
-  glass = false,
 }: {
   position: [number, number, number]
   size: [number, number, number]
@@ -420,18 +499,19 @@ function Panel({
   selected?: boolean
   focus?: boolean
   tone?: PanelTone
-  glass?: boolean
 }) {
   const hot = tone === 'hot' || (tone === 'plain' && selected)
+  const dim = tone === 'dim'
   return (
     <mesh position={position}>
       <boxGeometry args={size} />
       <meshStandardMaterial
         color={tone === 'hot' ? '#f4fff9' : color}
-        roughness={glass ? 0.08 : 0.62}
-        metalness={glass ? 0.05 : 0.02}
-        transparent={glass || tone === 'dim'}
-        opacity={tone === 'dim' ? 0.14 : glass ? 0.38 : 1}
+        roughness={0.62}
+        metalness={0.02}
+        transparent={dim}
+        opacity={dim ? 0.14 : 1}
+        depthWrite={!dim}
         emissive={hot ? '#1d4a42' : '#000000'}
         emissiveIntensity={tone === 'hot' ? 0.62 : hot ? (focus ? 0.5 : 0.22) : 0}
       />

@@ -53,6 +53,7 @@ export function ElementForm() {
             key={`${selected.id}-gap-${gapIndex}`}
             label={`Écart ${gapIndex + 1}`}
             value={gap}
+            min={0}
             hint={gapIndex === 0 ? 'Depuis le bas de la zone libre, en mm.' : "Depuis l'étagère du dessous, en mm."}
             onCommit={(value) => setShelfGap(gapIndex, value)}
           />
@@ -72,6 +73,8 @@ export function ElementForm() {
           <MmField
             label="Vide sous la tringle"
             value={selected.hangingGap}
+            min={HANGING_MIN}
+            max={HANGING_MAX}
             hint={`Limite : ${HANGING_MIN}–${HANGING_MAX} mm. Les étagères restent en dehors de ce vide.`}
             onCommit={setHangingGap}
           />

@@ -19,11 +19,11 @@ export function WallForm() {
       <h2 id="wall-title">Le mur</h2>
       <p className="lead">Largeur, hauteur, profondeur, socle. Le mur est encore vide.</p>
       <div className="fields">
-        <MmField label="Largeur" value={wall.width} hint={limitHint(width.min, width.max)} onCommit={(value) => setWall('width', value)} />
-        <MmField label="Hauteur" value={wall.height} hint={limitHint(LIMITS.height.min, LIMITS.height.max)} onCommit={(value) => setWall('height', value)} />
-        <MmField label="Profondeur" value={wall.depth} hint={limitHint(LIMITS.depth.min, LIMITS.depth.max)} onCommit={(value) => setWall('depth', value)} />
-        <MmField label="Socle" value={wall.socle} hint={limitHint(LIMITS.socle.min, LIMITS.socle.max)} onCommit={(value) => setWall('socle', value)} />
-        <MmField label="Jeu au plafond" value={wall.ceilingGap} hint={limitHint(LIMITS.ceilingGap.min, LIMITS.ceilingGap.max)} onCommit={(value) => setWall('ceilingGap', value)} />
+        <MmField label="Largeur" value={wall.width} min={width.min} max={width.max} hint={limitHint(width.min, width.max)} onCommit={(value) => setWall('width', value)} />
+        <MmField label="Hauteur" value={wall.height} min={LIMITS.height.min} max={LIMITS.height.max} hint={limitHint(LIMITS.height.min, LIMITS.height.max)} onCommit={(value) => setWall('height', value)} />
+        <MmField label="Profondeur" value={wall.depth} min={LIMITS.depth.min} max={LIMITS.depth.max} hint={limitHint(LIMITS.depth.min, LIMITS.depth.max)} onCommit={(value) => setWall('depth', value)} />
+        <MmField label="Socle" value={wall.socle} min={LIMITS.socle.min} max={LIMITS.socle.max} hint={limitHint(LIMITS.socle.min, LIMITS.socle.max)} onCommit={(value) => setWall('socle', value)} />
+        <MmField label="Jeu au plafond" value={wall.ceilingGap} min={LIMITS.ceilingGap.min} max={LIMITS.ceilingGap.max} hint={limitHint(LIMITS.ceilingGap.min, LIMITS.ceilingGap.max)} onCommit={(value) => setWall('ceilingGap', value)} />
       </div>
       <div className="readout">
         <span>Hauteur utile des caissons</span>
