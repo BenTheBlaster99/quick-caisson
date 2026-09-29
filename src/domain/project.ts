@@ -1,10 +1,11 @@
 import { redistribute, sumWidths, wallResizeError, wallWidthRange } from './caissons'
 import { applyShelfCount } from './layout'
-import { HANGING_DEFAULT, HANGING_MAX, HANGING_MIN, LIMITS, type WallField } from './rules'
+import { defaultProfile, readProfile, type RuleProfile } from './profile'
+import { LIMITS, type WallField } from './rules'
 import type { Caisson, DoorFinishId, DoorMode, DrawerThickness, FinishId, Project, RailMode, Wall } from './types'
 
 const RAILS: RailMode[] = ['aucune', 'haute', 'basse', 'double']
-const DOORS: DoorMode[] = ['aucune', 'battante', 'vitree']
+const DOORS: DoorMode[] = ['aucune', 'battante', 'vitree', 'coulissante']
 const FINISHES: FinishId[] = ['blanc', 'chene', 'anthracite']
 const DOOR_FINISHES: DoorFinishId[] = ['blanc', 'chene', 'anthracite', 'verre']
 
@@ -29,12 +30,14 @@ export function defaultProject(): Project {
     caisson('c3', 800, { drawers: 4 }),
     caisson('c4', 800, { shelves: 1, drawers: 2, pantalonniere: true }),
   ]
+  const rules = defaultProfile()
   return {
     format: 'caisson-project',
-    version: 1,
+    version: 2,
     wall,
     finish: 'chene',
-    caissons: seeds.map((item) => applyShelfCount(wall, item, item.shelves)),
+    caissons: seeds.map((item) => applyShelfCount(wall, item, item.shelves, rules)),
+    rules,
   }
 }
 
@@ -49,12 +52,13 @@ function caisson(
     shelves: options.shelves ?? 0,
     shelfGaps: [],
     rail: options.rail ?? 'aucune',
-    hangingGap: options.hangingGap ?? HANGING_DEFAULT,
+    hangingGap: options.hangingGap ?? defaultProfile().hangingDefaultMm,
     drawers: options.drawers ?? 0,
     drawerThickness: options.drawerThickness ?? 18,
     door: options.door ?? 'battante',
     doorFinish: options.doorFinish ?? 'chene',
     pantalonniere: options.pantalonniere ?? false,
+    locked: false,
   }
 }
 
@@ -70,9 +74,11 @@ export function setWallField(project: Project, field: WallField, value: number):
     return { ok: false, error: `${LIMITS[field].label} : indiquez un nombre entier de millimètres.` }
   }
   const limit = LIMITS[field]
-  const range = field === 'width' ? wallWidthRange(project.caissons.length) : limit
+  const widths = project.caissons.map((item) => item.width)
+  const locked = project.caissons.map((item) => item.locked)
+  const range = field === 'width' ? wallWidthRange(project.caissons.length, widths, locked) : limit
   if (value < range.min || value > range.max) {
-    if (field === 'width') return { ok: false, error: wallResizeError(project.caissons.length) }
+    if (field === 'width') return { ok: false, error: wallResizeError(project.caissons.length, widths, locked) }
     return {
       ok: false,
       error: `${limit.label} : la limite est ${limit.min}–${limit.max} mm.`,
@@ -82,18 +88,15 @@ export function setWallField(project: Project, field: WallField, value: number):
   const wall: Wall = { ...project.wall, [field]: value }
   if (field !== 'width') return { ok: true, project: { ...project, wall } }
 
-  const widths = redistribute(
-    project.caissons.map((item) => item.width),
-    value,
-  )
-  if (!widths) return { ok: false, error: wallResizeError(project.caissons.length) }
+  const nextWidths = redistribute(widths, value, locked)
+  if (!nextWidths) return { ok: false, error: wallResizeError(project.caissons.length, widths, locked) }
 
   return {
     ok: true,
     project: {
       ...project,
       wall,
-      caissons: project.caissons.map((item, index) => ({ ...item, width: widths[index] })),
+      caissons: project.caissons.map((item, index) => ({ ...item, width: nextWidths[index] })),
     },
   }
 }
@@ -103,6 +106,20 @@ export function applyWidths(project: Project, widths: number[]): Project {
     ...project,
     caissons: project.caissons.map((item, index) => ({ ...item, width: widths[index] })),
   }
+}
+
+export function applyRules(project: Project, patch: Partial<RuleProfile>): EditResult {
+  let rules: RuleProfile
+  try {
+    rules = readProfile({ ...project.rules, ...patch, id: project.rules.id, version: 1 })
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Profil refusé.' }
+  }
+  const caissons = project.caissons.map((caisson) => {
+    const hangingGap = Math.min(rules.hangingMaxMm, Math.max(rules.hangingMinMm, caisson.hangingGap))
+    return applyShelfCount(project.wall, { ...caisson, hangingGap }, caisson.shelves, rules)
+  })
+  return { ok: true, project: { ...project, rules, caissons } }
 }
 
 export function serializeProject(project: Project): string {
@@ -117,24 +134,25 @@ export function parseProject(text: string): Project {
     throw new Error('Ce fichier ne peut pas être lu.')
   }
   if (!isRecord(data)) throw new Error('Fichier illisible.')
-  if (data.format !== 'caisson-project' || data.version !== 1) {
+  if (data.format !== 'caisson-project' || (data.version !== 1 && data.version !== 2)) {
     throw new Error("Ce fichier n'est pas un projet Caisson.")
   }
 
   const wall = readWall(data.wall)
   const finish = readEnum(data.finish, FINISHES, 'Finition inconnue.')
+  const rules = data.version === 1 ? defaultProfile() : readProfile(data.rules)
   const legacyDoor = legacyDoorMode(data.front)
   if (!Array.isArray(data.caissons) || data.caissons.length === 0) {
     throw new Error('Le projet doit contenir au moins un caisson.')
   }
 
-  const caissons = data.caissons.map((item, index) => readCaisson(item, index, wall, finish, legacyDoor))
+  const caissons = data.caissons.map((item, index) => readCaisson(item, index, wall, finish, legacyDoor, rules))
   const total = sumWidths(caissons.map((item) => item.width))
   if (total !== wall.width) {
     throw new Error(`La somme des caissons (${total} mm) ne vaut pas la largeur du mur (${wall.width} mm).`)
   }
 
-  return { format: 'caisson-project', version: 1, wall, finish, caissons }
+  return { format: 'caisson-project', version: 2, wall, finish, caissons, rules }
 }
 
 function readWall(value: unknown): Wall {
@@ -168,6 +186,7 @@ function readCaisson(
   wall: Wall,
   carcass: FinishId,
   legacyDoor: DoorMode,
+  rules: RuleProfile,
 ): Caisson {
   if (!isRecord(value)) throw new Error(`Caisson ${index + 1} illisible.`)
   const id = typeof value.id === 'string' && value.id.trim() ? value.id : `c${index + 1}`
@@ -189,7 +208,7 @@ function readCaisson(
     value.doorFinish === undefined
       ? carcass
       : readEnum(value.doorFinish, DOOR_FINISHES, `Caisson ${index + 1} : finition de porte inconnue.`)
-  const hangingGap = readHanging(value.hangingGap)
+  const hangingGap = readHanging(value.hangingGap, rules)
   const drawerThickness = readDrawerThickness(value.drawerThickness)
   const base: Caisson = {
     id,
@@ -203,16 +222,17 @@ function readCaisson(
     door,
     doorFinish,
     pantalonniere,
+    locked: value.locked === true,
   }
   const gaps = readShelfGaps(value.shelfGaps, shelves as number)
-  if (!gaps) return applyShelfCount(wall, base, shelves as number)
+  if (!gaps) return applyShelfCount(wall, base, shelves as number, rules)
   return { ...base, shelfGaps: gaps }
 }
 
-function readHanging(value: unknown): number {
-  if (value === undefined) return HANGING_DEFAULT
-  if (!Number.isInteger(value) || (value as number) < HANGING_MIN || (value as number) > HANGING_MAX) {
-    throw new Error(`Vide sous la tringle hors ${HANGING_MIN}–${HANGING_MAX} mm.`)
+function readHanging(value: unknown, rules: RuleProfile): number {
+  if (value === undefined) return rules.hangingDefaultMm
+  if (!Number.isInteger(value) || (value as number) < rules.hangingMinMm || (value as number) > rules.hangingMaxMm) {
+    throw new Error(`Vide sous la tringle hors ${rules.hangingMinMm}–${rules.hangingMaxMm} mm.`)
   }
   return value as number
 }

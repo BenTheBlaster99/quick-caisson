@@ -1,15 +1,19 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { addCaisson, redistribute, removeCaisson, setCaissonWidth, sumWidths } from './caissons'
+import { addCaisson, duplicateCaisson, redistribute, removeCaisson, setCaissonWidth, sumWidths } from './caissons'
 import { buildCutList, formatCutCell } from './cutlist'
+import { recordChange, redoChange, undoChange } from './history'
 import { applyShelfGap, layoutCaisson, usableHeight } from './layout'
-import { defaultProject, parseProject, serializeProject, setWallField } from './project'
+import { defaultProfile } from './profile'
+import { applyRules, defaultProject, parseProject, serializeProject, setWallField } from './project'
 import type { Caisson, Project } from './types'
 
 function project(partial: Partial<Project> & Pick<Project, 'wall' | 'caissons'>): Project {
   return {
     format: 'caisson-project',
-    version: 1,
+    version: 2,
     finish: 'blanc',
+    rules: defaultProfile(),
     ...partial,
   }
 }
@@ -27,6 +31,7 @@ function box(id: string, width: number, extra: Partial<Caisson> = {}): Caisson {
     door: 'aucune',
     doorFinish: 'blanc',
     pantalonniere: false,
+    locked: false,
     ...extra,
   }
 }
@@ -124,6 +129,35 @@ describe('caisson widths', () => {
     expect(redistribute([800, 800, 800], 899)).toBeNull()
     const grown = redistribute([800, 800, 800], 3000)
     expect(grown && sumWidths(grown)).toBe(3000)
+  })
+
+  it('keeps a locked bay still when the wall or a neighbour moves', () => {
+    const locked = [false, true, false, false]
+    const resized = redistribute([800, 800, 800, 800], 3000, locked)
+    expect(resized).toEqual([800, 800, 800, 600])
+    expect(resized && sumWidths(resized)).toBe(3000)
+
+    const edited = setCaissonWidth([800, 800, 800, 600], 0, 900, locked)
+    expect(edited).toEqual({ ok: true, widths: [900, 800, 700, 600] })
+    if (edited.ok) expect(sumWidths(edited.widths)).toBe(3000)
+
+    expect(setCaissonWidth([800, 800, 800], 1, 700, [false, true, false]).ok).toBe(false)
+    expect(redistribute([800, 800, 800], 2000, [true, true, true])).toBeNull()
+  })
+
+  it('copies a caisson without changing the original width', () => {
+    const result = duplicateCaisson(
+      [box('a', 800, { shelves: 2, door: 'battante' }), box('b', 800), box('c', 800), box('d', 800)],
+      0,
+      () => 'copy',
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.caissons.map((item) => item.width)).toEqual([800, 800, 800, 500, 300])
+      expect(result.caissons[0]).toMatchObject({ id: 'a', shelves: 2, door: 'battante', width: 800 })
+      expect(result.caissons[1]).toMatchObject({ id: 'copy', shelves: 2, door: 'battante', locked: false })
+      expect(sumWidths(result.caissons.map((item) => item.width))).toBe(3200)
+    }
   })
 })
 
@@ -292,17 +326,25 @@ describe('cut list', () => {
   })
 
   it('matches the stage-1 hand check', () => {
+    const expected = JSON.parse(readFileSync(new URL('./fixtures/hand-check.json', import.meta.url), 'utf8')) as {
+      rows: [string, number, number, number, number][]
+    }
     const rows = buildCutList(defaultProject()).filter((row) => row.caisson === '1')
-    expect(rows.map((row) => [row.role, row.quantity, row.length, row.width, row.thickness])).toEqual([
-      ['joue', 2, 2400, 600, 18],
-      ['dessus', 1, 764, 600, 18],
-      ['dessous', 1, 764, 600, 18],
-      ['fond rapporté', 1, 2364, 764, 8],
-      ['étagère', 5, 764, 580, 18],
-      ['porte', 2, 2400, 400, 18],
-    ])
+    expect(rows.map((row) => [row.role, row.quantity, row.length, row.width, row.thickness])).toEqual(expected.rows)
     expect(rows.every((row) => row.material === 'Chêne')).toBe(true)
     expect(rows.every((row) => row.edges === 'avant' || row.edges === 'aucun')).toBe(true)
+  })
+
+  it('cuts two overlapping sliding doors from the saved overlap', () => {
+    const rows = buildCutList(
+      project({
+        wall,
+        caissons: [box('a', 1000, { door: 'coulissante' })],
+      }),
+    )
+    const doors = rows.filter((row) => row.role === 'porte')
+    expect(doors).toHaveLength(1)
+    expect(doors[0]).toMatchObject({ quantity: 2, length: 1800, width: 515, thickness: 18 })
   })
 
   it('keeps longueur as the long side on every panel', () => {
@@ -361,6 +403,24 @@ describe('cut list', () => {
     expect(opened.caissons[0].door).toBe('battante')
     expect(opened.caissons[0].hangingGap).toBe(900)
     expect(opened.caissons[0].drawerThickness).toBe(18)
+    expect(opened.rules).toEqual(defaultProfile())
+    expect(opened.version).toBe(2)
+    expect(opened.caissons[0].locked).toBe(false)
+    expect(buildCutList(opened).find((row) => row.role === 'joue')?.thickness).toBe(18)
+    expect(layoutCaisson(opened.wall, opened.caissons[0], opened.rules).interiorWidth).toBe(1000 - 36)
+  })
+
+  it('keeps a saved 19 mm carcass when a version-1 file still cuts at 18', () => {
+    const thick = project({
+      wall,
+      caissons: [box('a', 1000)],
+      rules: { ...defaultProfile(), carcassMm: 19 },
+    })
+    expect(layoutCaisson(thick.wall, thick.caissons[0], thick.rules).interiorWidth).toBe(1000 - 38)
+    expect(buildCutList(thick).find((row) => row.role === 'joue')?.thickness).toBe(19)
+    const reopened = parseProject(serializeProject(thick))
+    expect(reopened.rules.carcassMm).toBe(19)
+    expect(buildCutList(reopened).find((row) => row.role === 'joue')?.thickness).toBe(19)
   })
 })
 
@@ -380,5 +440,46 @@ describe('project file', () => {
     const current = defaultProject()
     current.caissons[0].width = 700
     expect(() => parseProject(JSON.stringify(current))).toThrow(/somme/)
+  })
+
+  it('keeps a saved carcass when an older profile has no sliding overlap', () => {
+    const sample = { width: 1000, height: 2000, depth: 400, socle: 100, ceilingGap: 100 }
+    const thick = project({
+      wall: sample,
+      caissons: [box('a', 1000)],
+      rules: { ...defaultProfile(), carcassMm: 19 },
+    })
+    const saved = JSON.parse(serializeProject(thick)) as { rules: Record<string, unknown> }
+    delete saved.rules.slidingOverlapMm
+    const opened = parseProject(JSON.stringify(saved))
+    expect(opened.rules.carcassMm).toBe(19)
+    expect(opened.rules.slidingOverlapMm).toBe(30)
+    expect(buildCutList(opened).find((row) => row.role === 'joue')?.thickness).toBe(19)
+  })
+
+  it('writes a rule change into this project only', () => {
+    const sample = { width: 1000, height: 2000, depth: 400, socle: 100, ceilingGap: 100 }
+    const current = project({ wall: sample, caissons: [box('a', 1000)] })
+    const result = applyRules(current, { carcassMm: 19 })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.rules.carcassMm).toBe(19)
+      expect(result.project.rules.shelfMm).toBe(18)
+      expect(buildCutList(result.project).find((row) => row.role === 'joue')?.thickness).toBe(19)
+      expect(buildCutList(current).find((row) => row.role === 'joue')?.thickness).toBe(18)
+    }
+    expect(applyRules(current, { hangingMinMm: 2000 }).ok).toBe(false)
+  })
+})
+
+describe('undo', () => {
+  it('restores the previous project and can redo it', () => {
+    const first = { name: 'first' }
+    const second = { name: 'second' }
+    const past = recordChange([], first)
+    const undone = undoChange(past, [], second)
+    expect(undone?.current).toEqual(first)
+    const redone = undone && redoChange(undone.past, undone.future, undone.current)
+    expect(redone?.current).toEqual(second)
   })
 })

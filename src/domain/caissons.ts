@@ -9,21 +9,53 @@ export function caissonCountLabel(count: number): string {
   return count > 1 ? `${count} caissons` : `${count} caisson`
 }
 
+function isLocked(locked: boolean[], index: number): boolean {
+  return locked[index] === true
+}
+
+/** Free bays, from the right. A locked bay is skipped. */
+function absorbOrder(count: number, locked: boolean[]): number[] {
+  const order: number[] = []
+  for (let index = count - 1; index >= 0; index -= 1) {
+    if (!isLocked(locked, index)) order.push(index)
+  }
+  return order
+}
+
 /**
- * Wall width changes from the right: the last caisson absorbs the delta,
- * then its left neighbour, inside 300–1200 mm.
+ * The neighbour that gives or takes the difference.
+ * Prefer the right side. The last caisson prefers the left.
+ * Locked bays are skipped.
  */
-export function redistribute(widths: number[], newTotal: number): number[] | null {
+function partnerOrder(index: number, count: number, locked: boolean[]): number[] {
+  const order: number[] = []
+  if (index < count - 1) {
+    for (let cursor = index + 1; cursor < count; cursor += 1) order.push(cursor)
+  }
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) order.push(cursor)
+  return order.filter((cursor) => !isLocked(locked, cursor))
+}
+
+/**
+ * Wall width changes from the right: the last unlocked caisson absorbs the delta,
+ * then the unlocked bay on its left, inside 300–1200 mm.
+ */
+export function redistribute(widths: number[], newTotal: number, locked: boolean[] = []): number[] | null {
   const count = widths.length
   if (count === 0) return null
-  if (newTotal < count * MIN_CAISSON || newTotal > count * MAX_CAISSON) return null
+  const range = wallWidthRange(count, widths, locked)
+  if (newTotal < range.min || newTotal > range.max) return null
 
   const next = [...widths]
   let delta = newTotal - sumWidths(next)
   if (delta === 0) return next
 
+  const order = absorbOrder(count, locked)
+  if (order.length === 0) return null
+
   if (delta > 0) {
-    for (let index = count - 1; index >= 0 && delta > 0; index -= 1) {
+    for (const index of order) {
+      if (delta === 0) break
       const room = MAX_CAISSON - next[index]
       const add = Math.min(room, delta)
       next[index] += add
@@ -31,7 +63,8 @@ export function redistribute(widths: number[], newTotal: number): number[] | nul
     }
   } else {
     delta = -delta
-    for (let index = count - 1; index >= 0 && delta > 0; index -= 1) {
+    for (const index of order) {
+      if (delta === 0) break
       const room = next[index] - MIN_CAISSON
       const sub = Math.min(room, delta)
       next[index] -= sub
@@ -43,17 +76,27 @@ export function redistribute(widths: number[], newTotal: number): number[] | nul
   return next
 }
 
-/** Widths the wall can take with this many caissons: wall limits, and 300–1200 mm each. */
-export function wallWidthRange(count: number): { min: number; max: number } {
+/** Widths the wall can take. Locked bays stay inside that total. */
+export function wallWidthRange(count: number, widths: number[] = [], locked: boolean[] = []): { min: number; max: number } {
+  const hasLocks = locked.some((item) => item) && widths.length === count
+  if (!hasLocks) {
+    return {
+      min: Math.max(LIMITS.width.min, count * MIN_CAISSON),
+      max: Math.min(LIMITS.width.max, count * MAX_CAISSON),
+    }
+  }
+  const fixed = widths.reduce((total, width, index) => total + (isLocked(locked, index) ? width : 0), 0)
+  const free = locked.filter((item) => !item).length
   return {
-    min: Math.max(LIMITS.width.min, count * MIN_CAISSON),
-    max: Math.min(LIMITS.width.max, count * MAX_CAISSON),
+    min: Math.max(LIMITS.width.min, fixed + free * MIN_CAISSON),
+    max: Math.min(LIMITS.width.max, fixed + free * MAX_CAISSON),
   }
 }
 
-export function wallResizeError(count: number): string {
-  const { min, max } = wallWidthRange(count)
-  return `Largeur refusée : avec ${caissonCountLabel(count)}, la limite est ${min}–${max} mm. Ajoutez ou retirez un caisson pour changer cette plage.`
+export function wallResizeError(count: number, widths: number[] = [], locked: boolean[] = []): string {
+  const { min, max } = wallWidthRange(count, widths, locked)
+  const locks = locked.some((item) => item) ? ' Les caissons verrouillés ne bougent pas.' : ''
+  return `Largeur refusée : avec ${caissonCountLabel(count)}, la limite est ${min}–${max} mm. Ajoutez ou retirez un caisson pour changer cette plage.${locks}`
 }
 
 export type WidthResult = { ok: true; widths: number[] } | { ok: false; error: string }
@@ -62,12 +105,15 @@ export type WidthResult = { ok: true; widths: number[] } | { ok: false; error: s
  * A width edit takes from, or gives to, the caisson on the right.
  * The last caisson trades with the one on its left.
  */
-export function setCaissonWidth(widths: number[], index: number, nextWidth: number): WidthResult {
+export function setCaissonWidth(widths: number[], index: number, nextWidth: number, locked: boolean[] = []): WidthResult {
   if (!Number.isInteger(nextWidth)) {
     return { ok: false, error: 'La largeur doit être un nombre entier de millimètres.' }
   }
   if (index < 0 || index >= widths.length) {
     return { ok: false, error: 'Caisson introuvable.' }
+  }
+  if (isLocked(locked, index)) {
+    return { ok: false, error: 'Largeur verrouillée. Déverrouillez ce caisson pour la changer.' }
   }
   if (nextWidth < MIN_CAISSON || nextWidth > MAX_CAISSON) {
     return {
@@ -85,7 +131,11 @@ export function setCaissonWidth(widths: number[], index: number, nextWidth: numb
     return { ok: true, widths: [...widths] }
   }
 
-  const neighbour = index === widths.length - 1 ? index - 1 : index + 1
+  const partners = partnerOrder(index, widths.length, locked)
+  if (partners.length === 0) {
+    return { ok: false, error: 'Largeur refusée : les autres caissons sont verrouillés.' }
+  }
+  const neighbour = partners[0]
   const delta = nextWidth - widths[index]
   const neighbourNext = widths[neighbour] - delta
   if (neighbourNext < MIN_CAISSON || neighbourNext > MAX_CAISSON) {
@@ -114,11 +164,14 @@ export type StructureResult =
   | { ok: true; caissons: Caisson[]; selectedIndex: number }
   | { ok: false; error: string }
 
-/** Split the widest caisson in half, only if both halves are at least 300 mm. */
+/** Split the widest unlocked caisson in half, only if both halves are at least 300 mm. */
 export function addCaisson(caissons: Caisson[], createId: () => string): StructureResult {
   if (caissons.length === 0) return { ok: false, error: 'Aucun caisson à couper.' }
-  const index = widestIndex(caissons)
-  const width = caissons[index].width
+  const unlocked = caissons.map((caisson, index) => ({ caisson, index })).filter((item) => !item.caisson.locked)
+  if (unlocked.length === 0) return { ok: false, error: 'Ajout refusé : tous les caissons sont verrouillés.' }
+  const index = widestIndex(unlocked.map((item) => item.caisson))
+  const sourceIndex = unlocked[index].index
+  const width = caissons[sourceIndex].width
   const left = Math.floor(width / 2)
   const right = width - left
   if (left < MIN_CAISSON || right < MIN_CAISSON || left > MAX_CAISSON || right > MAX_CAISSON) {
@@ -128,12 +181,44 @@ export function addCaisson(caissons: Caisson[], createId: () => string): Structu
     }
   }
 
-  const source = caissons[index]
-  const created: Caisson = { ...source, id: createId(), width: right, shelfGaps: [...source.shelfGaps] }
+  const source = caissons[sourceIndex]
+  const created: Caisson = { ...source, id: createId(), width: right, locked: false, shelfGaps: [...source.shelfGaps] }
   const next = caissons.map((caisson, cursor) =>
-    cursor === index ? { ...caisson, width: left, shelfGaps: [...source.shelfGaps] } : caisson,
+    cursor === sourceIndex ? { ...caisson, width: left, shelfGaps: [...source.shelfGaps] } : caisson,
   )
-  next.splice(index + 1, 0, created)
+  next.splice(sourceIndex + 1, 0, created)
+  return { ok: true, caissons: next, selectedIndex: sourceIndex + 1 }
+}
+
+/**
+ * Copy the interior onto a new bay. The source width stays.
+ * The new width is taken from the other unlocked bays, from the right.
+ */
+export function duplicateCaisson(caissons: Caisson[], index: number, createId: () => string): StructureResult {
+  if (index < 0 || index >= caissons.length) return { ok: false, error: 'Caisson introuvable.' }
+  const source = caissons[index]
+  const donors = caissons
+    .map((caisson, cursor) => ({ caisson, cursor }))
+    .filter((item) => item.cursor !== index && !item.caisson.locked)
+    .sort((a, b) => b.cursor - a.cursor)
+  const spare = donors.reduce((total, item) => total + (item.caisson.width - MIN_CAISSON), 0)
+  if (spare < MIN_CAISSON) {
+    return {
+      ok: false,
+      error: `Duplication refusée : les autres caissons n'ont pas ${MIN_CAISSON} mm à donner. La largeur du mur ne change pas.`,
+    }
+  }
+  const wanted = Math.min(source.width, MAX_CAISSON, spare)
+  const next = caissons.map((caisson) => ({ ...caisson, shelfGaps: [...caisson.shelfGaps] }))
+  let need = wanted
+  for (const donor of donors) {
+    if (need === 0) break
+    const give = Math.min(need, next[donor.cursor].width - MIN_CAISSON)
+    next[donor.cursor] = { ...next[donor.cursor], width: next[donor.cursor].width - give }
+    need -= give
+  }
+  const copy: Caisson = { ...source, id: createId(), width: wanted, locked: false, shelfGaps: [...source.shelfGaps] }
+  next.splice(index + 1, 0, copy)
   return { ok: true, caissons: next, selectedIndex: index + 1 }
 }
 
@@ -146,7 +231,11 @@ export function removeCaisson(caissons: Caisson[], index: number): StructureResu
     return { ok: false, error: 'Caisson introuvable.' }
   }
 
-  const recipient = index === caissons.length - 1 ? index - 1 : index + 1
+  const partners = partnerOrder(index, caissons.length, caissons.map((caisson) => caisson.locked))
+  if (partners.length === 0) {
+    return { ok: false, error: 'Suppression refusée : les autres caissons sont verrouillés.' }
+  }
+  const recipient = partners[0]
   const merged = caissons[recipient].width + caissons[index].width
   if (merged > MAX_CAISSON) {
     return {

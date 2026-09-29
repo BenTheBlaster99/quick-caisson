@@ -1,19 +1,5 @@
-import {
-  DRAWER_BOX_SHORT,
-  HANGING_DEFAULT,
-  HANGING_MAX,
-  HANGING_MIN,
-  MAX_DRAWERS,
-  MAX_SHELVES,
-  MIN_FREE,
-  NOMINAL_DRAWER,
-  PANEL,
-  RAIL_DIAMETER,
-  RAIL_HIGH_DROP,
-  SHELF_SETBACK,
-  DRAWER_DEPTH_INSET,
-  splitEven,
-} from './rules'
+import { defaultProfile, type RuleProfile } from './profile'
+import { MAX_DRAWERS, MAX_SHELVES, MIN_FREE, NOMINAL_DRAWER, RAIL_DIAMETER, RAIL_HIGH_DROP, splitEven } from './rules'
 import type { Caisson, DoorMode, Project, RailMode, Wall } from './types'
 
 export function usableHeight(wall: Wall): number {
@@ -59,17 +45,19 @@ export type CaissonLayout = {
 
 const RAIL_CLEAR = Math.ceil(RAIL_DIAMETER / 2)
 
-export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
+export function layoutCaisson(wall: Wall, caisson: Caisson, rules: RuleProfile = defaultProfile()): CaissonLayout {
+  const carcass = rules.carcassMm
+  const shelf = rules.shelfMm
   const boxHeight = usableHeight(wall)
-  const interiorBottom = PANEL
-  const interiorTop = boxHeight - PANEL
+  const interiorBottom = carcass
+  const interiorTop = boxHeight - carcass
   const interiorHeight = interiorTop - interiorBottom
-  const interiorWidth = caisson.width - 2 * PANEL
+  const interiorWidth = caisson.width - 2 * carcass
   const warnings: string[] = []
 
   const wantsUpper = caisson.shelves > 0 || caisson.rail !== 'aucune'
   const onlyDrawers = caisson.drawers > 0 && !wantsUpper
-  const closing = caisson.drawers > 0 ? PANEL : 0
+  const closing = caisson.drawers > 0 ? shelf : 0
   const aboveDrawers = Math.max(0, interiorHeight - closing)
 
   let drawerZone = 0
@@ -93,7 +81,7 @@ export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
   const drawers: DrawerMark[] = drawerHeights.map((height) => ({
     bottom: drawerBottom,
     height,
-    boxHeight: height > DRAWER_BOX_SHORT * 2 ? height - DRAWER_BOX_SHORT : height,
+    boxHeight: height > rules.drawerBoxShortMm * 2 ? height - rules.drawerBoxShortMm : height,
   }))
   for (let index = 1; index < drawers.length; index += 1) {
     drawers[index].bottom = drawers[index - 1].bottom + drawers[index - 1].height
@@ -101,7 +89,7 @@ export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
 
   const closingShelf: ShelfMark | null =
     drawers.length > 0
-      ? { bottom: interiorBottom + drawerZone, top: interiorBottom + drawerZone + PANEL }
+      ? { bottom: interiorBottom + drawerZone, top: interiorBottom + drawerZone + shelf }
       : null
 
   const bankTop = closingShelf ? closingShelf.top : interiorBottom
@@ -111,7 +99,7 @@ export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
   const shelfZoneTop = zone.top
   const zoneHeight = Math.max(0, shelfZoneTop - shelfZoneBottom)
 
-  const shelves = placeShelves(shelfZoneBottom, shelfZoneTop, caisson.shelves, caisson.shelfGaps, zoneHeight, warnings)
+  const shelves = placeShelves(shelfZoneBottom, shelfZoneTop, caisson.shelves, caisson.shelfGaps, zoneHeight, shelf, warnings)
 
   return {
     boxHeight,
@@ -119,8 +107,8 @@ export function layoutCaisson(wall: Wall, caisson: Caisson): CaissonLayout {
     interiorTop,
     interiorHeight,
     interiorWidth,
-    shelfDepth: wall.depth - SHELF_SETBACK,
-    drawerDepth: wall.depth - DRAWER_DEPTH_INSET,
+    shelfDepth: wall.depth - rules.shelfSetbackMm,
+    drawerDepth: wall.depth - rules.drawerDepthInsetMm,
     drawerThickness: caisson.drawerThickness,
     drawerZone,
     shelfZoneBottom,
@@ -178,11 +166,12 @@ function placeShelves(
   count: number,
   gaps: number[],
   zoneHeight: number,
+  shelfMm: number,
   warnings: string[],
 ): ShelfMark[] {
   if (count <= 0) return []
-  const needed = count * PANEL
-  const distances = gaps.length === count ? gaps : equalShelfGaps(zoneHeight, count)
+  const needed = count * shelfMm
+  const distances = gaps.length === count ? gaps : equalShelfGaps(zoneHeight, count, shelfMm)
   if (zoneHeight < needed || distances.reduce((sum, gap) => sum + gap, 0) + needed > zoneHeight) {
     warnings.push(`${count} étagères ne tiennent pas dans la zone libre (${zoneHeight} mm).`)
     return []
@@ -192,7 +181,7 @@ function placeShelves(
   for (const gap of distances) {
     cursor += gap
     const bottom = cursor
-    const top = bottom + PANEL
+    const top = bottom + shelfMm
     if (top > zoneTop) {
       warnings.push(`${count} étagères ne tiennent pas dans la zone libre (${zoneHeight} mm).`)
       return []
@@ -203,18 +192,18 @@ function placeShelves(
   return shelves
 }
 
-export function equalShelfGaps(zoneHeight: number, count: number): number[] {
+export function equalShelfGaps(zoneHeight: number, count: number, shelfMm: number = defaultProfile().shelfMm): number[] {
   if (count <= 0) return []
-  const needed = count * PANEL
+  const needed = count * shelfMm
   if (zoneHeight < needed) return Array.from({ length: count }, () => 0)
   return splitEven(zoneHeight - needed, count + 1).slice(0, count)
 }
 
-export function applyShelfCount(wall: Wall, caisson: Caisson, shelves: number): Caisson {
+export function applyShelfCount(wall: Wall, caisson: Caisson, shelves: number, rules: RuleProfile = defaultProfile()): Caisson {
   const count = clampShelves(shelves)
   const draft = { ...caisson, shelves: count, shelfGaps: [] }
-  const zone = layoutCaisson(wall, draft)
-  return { ...draft, shelfGaps: equalShelfGaps(zone.shelfZoneTop - zone.shelfZoneBottom, count) }
+  const zone = layoutCaisson(wall, draft, rules)
+  return { ...draft, shelfGaps: equalShelfGaps(zone.shelfZoneTop - zone.shelfZoneBottom, count, rules.shelfMm) }
 }
 
 export function applyShelfGap(
@@ -222,6 +211,7 @@ export function applyShelfGap(
   caisson: Caisson,
   index: number,
   gap: number,
+  rules: RuleProfile = defaultProfile(),
 ): { ok: true; caisson: Caisson } | { ok: false; error: string } {
   if (!Number.isInteger(gap) || gap < 0) {
     return { ok: false, error: 'Distance refusée : indiquez un nombre entier de millimètres, positif ou nul.' }
@@ -229,12 +219,12 @@ export function applyShelfGap(
   if (index < 0 || index >= caisson.shelves) {
     return { ok: false, error: 'Étagère introuvable.' }
   }
-  const nextGaps = caisson.shelfGaps.length === caisson.shelves ? [...caisson.shelfGaps] : equalShelfGaps(shelfZoneHeight(wall, caisson), caisson.shelves)
+  const nextGaps = caisson.shelfGaps.length === caisson.shelves ? [...caisson.shelfGaps] : equalShelfGaps(shelfZoneHeight(wall, caisson, rules), caisson.shelves, rules.shelfMm)
   nextGaps[index] = gap
-  const zoneHeight = shelfZoneHeight(wall, { ...caisson, shelfGaps: nextGaps })
-  const used = nextGaps.reduce((sum, item) => sum + item, 0) + caisson.shelves * PANEL
+  const zoneHeight = shelfZoneHeight(wall, { ...caisson, shelfGaps: nextGaps }, rules)
+  const used = nextGaps.reduce((sum, item) => sum + item, 0) + caisson.shelves * rules.shelfMm
   if (used > zoneHeight) {
-    const room = Math.max(0, zoneHeight - (used - gap) - caisson.shelves * PANEL)
+    const room = Math.max(0, zoneHeight - (used - gap) - caisson.shelves * rules.shelfMm)
     return {
       ok: false,
       error: `Distance refusée : ${gap} mm ne tient pas. Il reste ${room} mm dans la zone libre.`,
@@ -247,40 +237,46 @@ export function applyHangingGap(
   wall: Wall,
   caisson: Caisson,
   gap: number,
+  rules: RuleProfile = defaultProfile(),
 ): { ok: true; caisson: Caisson } | { ok: false; error: string } {
-  if (!Number.isInteger(gap) || gap < HANGING_MIN || gap > HANGING_MAX) {
-    return { ok: false, error: `Vide sous la tringle : la limite est ${HANGING_MIN}–${HANGING_MAX} mm.` }
+  if (!Number.isInteger(gap) || gap < rules.hangingMinMm || gap > rules.hangingMaxMm) {
+    return { ok: false, error: `Vide sous la tringle : la limite est ${rules.hangingMinMm}–${rules.hangingMaxMm} mm.` }
   }
   const next = { ...caisson, hangingGap: gap }
-  const layout = layoutCaisson(wall, next)
+  const layout = layoutCaisson(wall, next, rules)
   const blocked = layout.warnings.some((warning) => warning.startsWith('Vide sous la tringle'))
   if (blocked) {
     return { ok: false, error: `Vide sous la tringle : ${gap} mm ne tient pas dans ce caisson.` }
   }
-  return { ok: true, caisson: rebalanceShelves(wall, next) }
+  return { ok: true, caisson: rebalanceShelves(wall, next, rules) }
 }
 
-export function applyRail(wall: Wall, caisson: Caisson, rail: RailMode): { ok: true; caisson: Caisson } | { ok: false; error: string } {
-  const next = { ...caisson, rail, hangingGap: caisson.hangingGap || HANGING_DEFAULT }
-  const layout = layoutCaisson(wall, { ...next, shelves: caisson.shelves, shelfGaps: [] })
+export function applyRail(
+  wall: Wall,
+  caisson: Caisson,
+  rail: RailMode,
+  rules: RuleProfile = defaultProfile(),
+): { ok: true; caisson: Caisson } | { ok: false; error: string } {
+  const next = { ...caisson, rail, hangingGap: caisson.hangingGap || rules.hangingDefaultMm }
+  const layout = layoutCaisson(wall, { ...next, shelves: caisson.shelves, shelfGaps: [] }, rules)
   const blocked = layout.warnings.some((warning) => warning.startsWith('Vide sous la tringle') || warning.startsWith('La tringle'))
   if (rail !== 'aucune' && blocked) {
     return { ok: false, error: `Tringle refusée : ${next.hangingGap} mm ne tiennent pas dans ce caisson.` }
   }
-  return { ok: true, caisson: rebalanceShelves(wall, next) }
+  return { ok: true, caisson: rebalanceShelves(wall, next, rules) }
 }
 
-function rebalanceShelves(wall: Wall, caisson: Caisson): Caisson {
-  return applyShelfCount(wall, caisson, caisson.shelves)
+function rebalanceShelves(wall: Wall, caisson: Caisson, rules: RuleProfile): Caisson {
+  return applyShelfCount(wall, caisson, caisson.shelves, rules)
 }
 
-function shelfZoneHeight(wall: Wall, caisson: Caisson): number {
-  const layout = layoutCaisson(wall, { ...caisson, shelves: 0, shelfGaps: [] })
+function shelfZoneHeight(wall: Wall, caisson: Caisson, rules: RuleProfile): number {
+  const layout = layoutCaisson(wall, { ...caisson, shelves: 0, shelfGaps: [] }, rules)
   return Math.max(0, layout.shelfZoneTop - layout.shelfZoneBottom)
 }
 
 export function layoutProject(project: Project): CaissonLayout[] {
-  return project.caissons.map((caisson) => layoutCaisson(project.wall, caisson))
+  return project.caissons.map((caisson) => layoutCaisson(project.wall, caisson, project.rules))
 }
 
 export function clampShelves(value: number): number {
@@ -296,14 +292,21 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)))
 }
 
-export function doorCountForCaisson(width: number): number {
-  return width < 600 ? 1 : 2
+export function doorCountForCaisson(width: number, doorSplitMm: number = defaultProfile().doorSplitMm): number {
+  return width < doorSplitMm ? 1 : 2
 }
 
-export function doorLabel(mode: DoorMode, width: number): string {
+/** Leaf widths. Sliding leaves overlap, so their sum is wider than the bay. */
+export function doorLeaves(width: number, mode: DoorMode, rules: RuleProfile = defaultProfile()): number[] {
+  if (mode === 'aucune') return []
+  if (mode === 'coulissante') return splitEven(width + rules.slidingOverlapMm, 2)
+  return splitEven(width, doorCountForCaisson(width, rules.doorSplitMm))
+}
+
+export function doorLabel(mode: DoorMode, width: number, rules: RuleProfile = defaultProfile()): string {
   if (mode === 'aucune') return 'Aucune porte.'
-  const count = doorCountForCaisson(width)
-  const widths = splitEven(width, count)
-  const kind = mode === 'vitree' ? 'vitrée' : 'battante'
-  return `${count} porte${count > 1 ? 's' : ''} ${kind}${count > 1 ? 's' : ''} de ${widths.join(' / ')} mm`
+  const leaves = doorLeaves(width, mode, rules)
+  const kind = mode === 'vitree' ? 'vitrée' : mode === 'coulissante' ? 'coulissante' : 'battante'
+  const overlap = mode === 'coulissante' ? `, recouvrement ${rules.slidingOverlapMm} mm` : ''
+  return `${leaves.length} porte${leaves.length > 1 ? 's' : ''} ${kind}${leaves.length > 1 ? 's' : ''} de ${leaves.join(' / ')} mm${overlap}`
 }

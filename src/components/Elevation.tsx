@@ -1,6 +1,5 @@
-import { layoutProject, usableHeight } from '../domain/layout'
-import { doorCountForCaisson } from '../domain/layout'
-import { finishById, splitEven } from '../domain/rules'
+import { doorLeaves, layoutProject, usableHeight } from '../domain/layout'
+import { finishById } from '../domain/rules'
 import type { Project } from '../domain/types'
 
 export function Elevation({
@@ -15,6 +14,7 @@ export function Elevation({
   listed?: boolean
 }) {
   const wall = project.wall
+  const panel = project.rules.carcassMm
   const layouts = layoutProject(project)
   const selected = Math.max(0, project.caissons.findIndex((caisson) => caisson.id === selectedId))
   const wash = finishById(project.finish).color
@@ -84,9 +84,9 @@ export function Elevation({
                 <rect
                   key={`${caisson.id}-d-${drawerIndex}`}
                   className="fill"
-                  x={xOf(start + 18)}
+                  x={xOf(start + panel)}
                   y={yOf(wall.socle + drawer.bottom + drawer.height)}
-                  width={(caisson.width - 36) * scale}
+                  width={(caisson.width - panel * 2) * scale}
                   height={drawer.height * scale}
                   fill="none"
                 />
@@ -94,8 +94,8 @@ export function Elevation({
               {layout.closingShelf && (
                 <line
                   className="drawing"
-                  x1={xOf(start + 18)}
-                  x2={xOf(start + caisson.width - 18)}
+                  x1={xOf(start + panel)}
+                  x2={xOf(start + caisson.width - panel)}
                   y1={yOf(wall.socle + layout.closingShelf.top)}
                   y2={yOf(wall.socle + layout.closingShelf.top)}
                   strokeWidth={2.5}
@@ -105,8 +105,8 @@ export function Elevation({
                 <line
                   key={`${caisson.id}-s-${shelfIndex}`}
                   className="drawing"
-                  x1={xOf(start + 18)}
-                  x2={xOf(start + caisson.width - 18)}
+                  x1={xOf(start + panel)}
+                  x2={xOf(start + caisson.width - panel)}
                   y1={yOf(wall.socle + shelf.top)}
                   y2={yOf(wall.socle + shelf.top)}
                   strokeWidth={2}
@@ -115,8 +115,8 @@ export function Elevation({
               {layout.rails.map((rail) => (
                 <line
                   key={`${caisson.id}-${rail.kind}`}
-                  x1={xOf(start + 18)}
-                  x2={xOf(start + caisson.width - 18)}
+                  x1={xOf(start + panel)}
+                  x2={xOf(start + caisson.width - panel)}
                   y1={yOf(wall.socle + rail.axis)}
                   y2={yOf(wall.socle + rail.axis)}
                   stroke="#6d737a"
@@ -124,8 +124,28 @@ export function Elevation({
                   strokeDasharray="5 3"
                 />
               ))}
-              {caisson.door !== 'aucune' &&
-                splitEven(caisson.width, doorCountForCaisson(caisson.width)).slice(0, -1).map((_, doorIndex, doors) => {
+              {caisson.door === 'coulissante' && (
+                <>
+                  <line
+                    className="drawing"
+                    x1={xOf(start + caisson.width / 2 - project.rules.slidingOverlapMm / 2)}
+                    x2={xOf(start + caisson.width / 2 - project.rules.slidingOverlapMm / 2)}
+                    y1={yOf(wall.socle)}
+                    y2={yOf(wall.socle + boxHeight)}
+                    strokeDasharray="4 3"
+                  />
+                  <line
+                    className="drawing"
+                    x1={xOf(start + caisson.width / 2 + project.rules.slidingOverlapMm / 2)}
+                    x2={xOf(start + caisson.width / 2 + project.rules.slidingOverlapMm / 2)}
+                    y1={yOf(wall.socle)}
+                    y2={yOf(wall.socle + boxHeight)}
+                    strokeDasharray="4 3"
+                  />
+                </>
+              )}
+              {caisson.door !== 'aucune' && caisson.door !== 'coulissante' &&
+                doorLeaves(caisson.width, caisson.door, project.rules).slice(0, -1).map((_, doorIndex, doors) => {
                   const at = start + doors.slice(0, doorIndex + 1).reduce((sum, width) => sum + width, 0)
                   return (
                     <line

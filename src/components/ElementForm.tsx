@@ -1,5 +1,5 @@
 import { doorLabel, layoutCaisson } from '../domain/layout'
-import { DOOR_FINISHES, FINISHES, HANGING_MAX, HANGING_MIN } from '../domain/rules'
+import { DOOR_FINISHES, FINISHES } from '../domain/rules'
 import type { DoorFinishId, DoorMode, DrawerThickness, FinishId, RailMode } from '../domain/types'
 import { useProject } from '../state/project-context'
 import { MmField } from './MmField'
@@ -15,6 +15,7 @@ const DOORS: { id: DoorMode; label: string }[] = [
   { id: 'aucune', label: 'Aucune' },
   { id: 'battante', label: 'Battante' },
   { id: 'vitree', label: 'Vitrée' },
+  { id: 'coulissante', label: 'Coulissante' },
 ]
 
 const THICKNESS: DrawerThickness[] = [16, 18]
@@ -22,7 +23,9 @@ const THICKNESS: DrawerThickness[] = [16, 18]
 export function ElementForm() {
   const { project, selected, select, setShelves, setShelfGap, setRail, setHangingGap, setDrawers, setDrawerThickness, setDoor, setDoorFinish } = useProject()
   const index = project.caissons.findIndex((caisson) => caisson.id === selected.id)
-  const layout = layoutCaisson(project.wall, selected)
+  const layout = layoutCaisson(project.wall, selected, project.rules)
+  const hangingMin = project.rules.hangingMinMm
+  const hangingMax = project.rules.hangingMaxMm
 
   return (
     <section className="panel" aria-labelledby="element-title">
@@ -73,9 +76,9 @@ export function ElementForm() {
           <MmField
             label="Vide sous la tringle"
             value={selected.hangingGap}
-            min={HANGING_MIN}
-            max={HANGING_MAX}
-            hint={`Limite : ${HANGING_MIN}–${HANGING_MAX} mm. Les étagères restent en dehors de ce vide.`}
+            min={hangingMin}
+            max={hangingMax}
+            hint={`Limite : ${hangingMin}–${hangingMax} mm. Les étagères restent en dehors de ce vide.`}
             onCommit={setHangingGap}
           />
         )}
@@ -112,7 +115,7 @@ export function ElementForm() {
             </button>
           ))}
         </div>
-        <p className="summary">{doorLabel(selected.door, selected.width)}</p>
+        <p className="summary">{doorLabel(selected.door, selected.width, project.rules)}</p>
         {selected.door !== 'aucune' && (
           <div className="swatches" role="group" aria-label="Finition des portes">
             {DOOR_FINISHES.map((finish) => (
@@ -169,7 +172,7 @@ export function FacadeForm() {
       <ul className="door-lines">
         {project.caissons.map((caisson, index) => (
           <li key={caisson.id}>
-            Caisson {index + 1} · {doorLabel(caisson.door, caisson.width)}
+            Caisson {index + 1} · {doorLabel(caisson.door, caisson.width, project.rules)}
           </li>
         ))}
       </ul>

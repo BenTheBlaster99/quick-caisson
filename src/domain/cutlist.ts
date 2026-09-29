@@ -1,5 +1,5 @@
-import { doorCountForCaisson, layoutCaisson, usableHeight } from './layout'
-import { BACK, doorFinishById, finishById, PANEL, splitEven } from './rules'
+import { doorLeaves, layoutCaisson, usableHeight } from './layout'
+import { doorFinishById, finishById } from './rules'
 import type { CutRow, Project } from './types'
 
 const ROLE = {
@@ -25,10 +25,13 @@ export function buildCutList(project: Project): CutRow[] {
   const material = finishById(project.finish).name
   const height = usableHeight(project.wall)
   const depth = project.wall.depth
+  const carcass = project.rules.carcassMm
+  const shelf = project.rules.shelfMm
+  const back = project.rules.backMm
 
   project.caissons.forEach((caisson, index) => {
     const label = String(index + 1)
-    const layout = layoutCaisson(project.wall, caisson)
+    const layout = layoutCaisson(project.wall, caisson, project.rules)
     const inner = layout.interiorWidth
 
     push(rows, {
@@ -38,7 +41,7 @@ export function buildCutList(project: Project): CutRow[] {
       roleOrder: ROLE.joue,
       quantity: 2,
       ...longSide(height, depth),
-      thickness: PANEL,
+      thickness: carcass,
       material,
       edges: 'avant',
     })
@@ -49,7 +52,7 @@ export function buildCutList(project: Project): CutRow[] {
       roleOrder: ROLE.dessus,
       quantity: 1,
       ...longSide(inner, depth),
-      thickness: PANEL,
+      thickness: carcass,
       material,
       edges: 'avant',
     })
@@ -60,7 +63,7 @@ export function buildCutList(project: Project): CutRow[] {
       roleOrder: ROLE.dessous,
       quantity: 1,
       ...longSide(inner, depth),
-      thickness: PANEL,
+      thickness: carcass,
       material,
       edges: 'avant',
     })
@@ -71,7 +74,7 @@ export function buildCutList(project: Project): CutRow[] {
       roleOrder: ROLE.fond,
       quantity: 1,
       ...longSide(layout.interiorHeight, inner),
-      thickness: BACK,
+      thickness: back,
       material,
       edges: 'aucun',
     })
@@ -84,7 +87,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.etagere,
         quantity: layout.shelves.length,
         ...longSide(inner, layout.shelfDepth),
-        thickness: PANEL,
+        thickness: shelf,
         material,
         edges: 'avant',
       })
@@ -98,7 +101,7 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.dessusTiroirs,
         quantity: 1,
         ...longSide(inner, layout.shelfDepth),
-        thickness: PANEL,
+        thickness: shelf,
         material,
         edges: 'avant',
       })
@@ -174,15 +177,14 @@ export function buildCutList(project: Project): CutRow[] {
         roleOrder: ROLE.fondTiroir,
         quantity: 1,
         ...longSide(boxWidth, boxDepth - 2 * board),
-        thickness: BACK,
+        thickness: back,
         material,
         edges: 'aucun',
       })
     }
 
     if (caisson.door !== 'aucune') {
-      const count = doorCountForCaisson(caisson.width)
-      const widths = splitEven(caisson.width, count)
+      const widths = doorLeaves(caisson.width, caisson.door, project.rules)
       const doorMaterial = caisson.door === 'vitree' || caisson.doorFinish === 'verre' ? 'verre' : doorFinishById(caisson.doorFinish).name
       for (const doorWidth of widths) {
         push(rows, {
@@ -192,7 +194,7 @@ export function buildCutList(project: Project): CutRow[] {
           roleOrder: ROLE.porte,
           quantity: 1,
           ...longSide(height, doorWidth),
-          thickness: PANEL,
+          thickness: carcass,
           material: doorMaterial,
           edges: 'avant',
         })
@@ -208,7 +210,7 @@ export function buildCutList(project: Project): CutRow[] {
       roleOrder: ROLE.socle,
       quantity: 1,
       ...longSide(project.wall.width, project.wall.socle),
-      thickness: PANEL,
+      thickness: carcass,
       material,
       edges: 'avant',
     })
@@ -218,8 +220,8 @@ export function buildCutList(project: Project): CutRow[] {
       role: 'retour socle',
       roleOrder: ROLE.retour,
       quantity: 2,
-      ...longSide(project.wall.depth - PANEL, project.wall.socle),
-      thickness: PANEL,
+      ...longSide(project.wall.depth - carcass, project.wall.socle),
+      thickness: carcass,
       material,
       edges: 'avant',
     })

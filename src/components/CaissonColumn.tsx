@@ -3,15 +3,16 @@ import { useProject } from '../state/project-context'
 import { MmField } from './MmField'
 
 export function CaissonColumn() {
-  const { project, selected, select, setWidth, add, remove } = useProject()
+  const { project, selected, select, setWidth, setLocked, add, duplicate, remove } = useProject()
   const finish = finishById(project.finish)
   const ink = project.finish === 'anthracite' ? '#f4f1ea' : '#1c1a16'
   const index = project.caissons.findIndex((caisson) => caisson.id === selected.id)
   const neighbour = index === project.caissons.length - 1 ? 'gauche' : 'droite'
-  const widthHint =
-    project.caissons.length === 1
+  const widthHint = selected.locked
+    ? 'Largeur verrouillée. Le mur et les voisins ne la changent pas.'
+    : project.caissons.length === 1
       ? '300–1200 mm. Ce caisson fait toute la largeur du mur.'
-      : `300–1200 mm. L'écart est pris sur le caisson de ${neighbour}.`
+      : `300–1200 mm. L'écart est pris sur le premier caisson déverrouillé, côté ${neighbour}.`
 
   return (
     <section className="panel" aria-labelledby="bays-title">
@@ -29,7 +30,7 @@ export function CaissonColumn() {
             style={{ flex: `${caisson.width} 1 0`, background: finish.color, color: ink }}
             onClick={() => select(caisson.id)}
           >
-            <strong>{bayIndex + 1}</strong>
+            <strong>{bayIndex + 1}{caisson.locked ? ' · verrou' : ''}</strong>
             <small>{caisson.width}</small>
           </button>
         ))}
@@ -41,12 +42,19 @@ export function CaissonColumn() {
           min={MIN_CAISSON}
           max={MAX_CAISSON}
           hint={widthHint}
+          disabled={selected.locked}
           onCommit={setWidth}
         />
       </div>
       <div className="row-actions" style={{ marginTop: 12 }}>
+        <button type="button" className="secondary" aria-pressed={selected.locked} onClick={() => setLocked(!selected.locked)}>
+          {selected.locked ? 'Déverrouiller' : 'Verrouiller'}
+        </button>
         <button type="button" className="secondary" onClick={add}>
           Ajouter
+        </button>
+        <button type="button" className="secondary" onClick={duplicate}>
+          Dupliquer
         </button>
         <button type="button" className="secondary" onClick={remove} disabled={project.caissons.length === 1}>
           Retirer

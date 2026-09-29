@@ -5,6 +5,8 @@ import { ElementForm, FacadeForm } from './components/ElementForm'
 import { Elevation } from './components/Elevation'
 import { Scene, type PartPick, type SceneView } from './components/Scene'
 import { PrintSheet } from './components/PrintSheet'
+import { RulesForm } from './components/RulesForm'
+import { RULE_INDICATORS, ruleStory, type RuleField } from './components/rule-indicators'
 import { Toolbar } from './components/Toolbar'
 import { WallForm } from './components/WallForm'
 import { cutRowKey } from './domain/cutlist'
@@ -16,6 +18,7 @@ const STEPS = [
   { id: 'caissons', label: 'Les caissons' },
   { id: 'interieur', label: "L'intérieur" },
   { id: 'facade', label: 'La façade' },
+  { id: 'regles', label: 'Règles' },
   { id: 'liste', label: 'La liste' },
 ] as const
 
@@ -31,7 +34,12 @@ export function App() {
   const [partKey, setPartKey] = useState<string | null>(null)
   const [part, setPart] = useState<PartPick | null>(null)
   const [listBoard, setListBoard] = useState<'closet' | 'elevation'>('closet')
+  const [ruleField, setRuleField] = useState<RuleField>('carcassMm')
+  const [drawersOut, setDrawersOut] = useState(false)
   const current = STEPS[step]
+  const rule = current.id === 'regles' ? RULE_INDICATORS[ruleField] : null
+  const revealDrawers = drawersOut || rule?.revealDrawers === true
+  const hasDrawers = project.caissons.some((caisson) => caisson.drawers > 0)
 
   function chooseRow(row: CutRow) {
     const key = cutRowKey(row)
@@ -55,7 +63,11 @@ export function App() {
   }
 
   const sceneView: SceneView =
-    current.id === 'mur' ? 'envelope' : current.id === 'caissons' ? 'boxes' : 'facade'
+    current.id === 'mur' ? 'envelope' : current.id === 'caissons' ? 'boxes' : rule ? rule.view : current.id === 'regles' ? 'interior' : 'facade'
+  const sceneDoorsOpen = rule ? rule.doorsOpen : doorsOpen
+  const sceneHighlight = rule && rule.roles.length > 0
+    ? { caissonIndex: -1, role: rule.roles[0], length: null, width: null, roles: rule.roles }
+    : null
 
   return (
     <>
@@ -93,6 +105,11 @@ export function App() {
                 <button type="button" className="secondary" onClick={() => setListBoard('elevation')}>
                   Élévation
                 </button>
+                {hasDrawers && (
+                  <button type="button" className="secondary" aria-pressed={drawersOut} onClick={() => setDrawersOut((open) => !open)}>
+                    {drawersOut ? 'Rentrer les tiroirs' : 'Voir dans les tiroirs'}
+                  </button>
+                )}
               </div>
               <div className="viewport-3d">
                 <ViewBoundary>
@@ -104,6 +121,7 @@ export function App() {
                     view="facade"
                     onSelect={select}
                     highlight={part}
+                    revealDrawers={revealDrawers}
                   />
                 </ViewBoundary>
               </div>
@@ -118,12 +136,22 @@ export function App() {
             {current.id === 'caissons' && <CaissonColumn />}
             {current.id === 'interieur' && <ElementForm />}
             {current.id === 'facade' && <FacadeForm />}
+            {current.id === 'regles' && <RulesForm active={ruleField} onActive={setRuleField} />}
           </div>
           <section className="stage-main" aria-label="Vue 3D">
             <div className="viewport-bar">
               <span className="hint">
-                {current.id === 'mur' ? 'Le volume du mur' : 'Glisser pour tourner. Cliquer un caisson pour le choisir.'}
+                {current.id === 'mur'
+                  ? 'Le volume du mur'
+                  : rule
+                    ? ruleStory(ruleField, project, selected)
+                    : 'Glisser pour tourner. Cliquer un caisson pour le choisir.'}
               </span>
+              {hasDrawers && (current.id === 'interieur' || current.id === 'facade' || current.id === 'regles') && (
+                <button type="button" className="secondary" aria-pressed={drawersOut} onClick={() => setDrawersOut((open) => !open)}>
+                  {drawersOut ? 'Rentrer les tiroirs' : 'Voir dans les tiroirs'}
+                </button>
+              )}
               {(current.id === 'facade' || current.id === 'interieur') && project.caissons.some((caisson) => caisson.door !== 'aucune') && (
                 <button type="button" className="secondary" onClick={toggleDoors}>
                   {doorsOpen ? 'Fermer les façades' : 'Ouvrir les façades'}
@@ -135,10 +163,13 @@ export function App() {
                 <Scene
                   project={project}
                   selectedId={selected.id}
-                  doorsOpen={doorsOpen}
+                  doorsOpen={sceneDoorsOpen}
                   frameToken={frameToken}
                   view={sceneView}
                   onSelect={select}
+                  highlight={sceneHighlight}
+                  revealDrawers={revealDrawers}
+                  guide={current.id === 'regles' ? ruleField : null}
                 />
               </ViewBoundary>
             </div>

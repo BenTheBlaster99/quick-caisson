@@ -5,17 +5,21 @@ export function MmField({
   value,
   hint,
   onCommit,
+  onActivate,
   min,
   max,
   step = 10,
+  disabled = false,
 }: {
   label: string
   value: number
   hint: string
   onCommit: (value: number) => boolean
+  onActivate?: () => void
   min?: number
   max?: number
   step?: number
+  disabled?: boolean
 }) {
   const [text, setText] = useState(String(value))
   const valueRef = useRef(value)
@@ -29,6 +33,7 @@ export function MmField({
   useEffect(() => () => stopHold(), [])
 
   function commit() {
+    onActivate?.()
     const trimmed = text.trim()
     if (!/^-?\d+$/.test(trimmed)) {
       setText(String(value))
@@ -65,6 +70,7 @@ export function MmField({
   }
 
   function hold(event: ReactPointerEvent<HTMLButtonElement>, direction: 1 | -1) {
+    onActivate?.()
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     stopHold()
@@ -91,7 +97,7 @@ export function MmField({
         <button
           type="button"
           aria-label="Diminuer"
-          disabled={min !== undefined && value <= min}
+          disabled={disabled || (min !== undefined && value <= min)}
           onPointerDown={(event) => hold(event, -1)}
           onPointerUp={stopHold}
           onPointerCancel={stopHold}
@@ -100,7 +106,9 @@ export function MmField({
         </button>
         <input
           inputMode="numeric"
+          disabled={disabled}
           value={text}
+          onFocus={() => onActivate?.()}
           onChange={(event) => setText(event.target.value)}
           onBlur={commit}
           onKeyDown={(event) => {
@@ -110,7 +118,7 @@ export function MmField({
         <button
           type="button"
           aria-label="Augmenter"
-          disabled={max !== undefined && value >= max}
+          disabled={disabled || (max !== undefined && value >= max)}
           onPointerDown={(event) => hold(event, 1)}
           onPointerUp={stopHold}
           onPointerCancel={stopHold}

@@ -3,7 +3,7 @@ import { printSheet } from './PrintSheet'
 import { useProject } from '../state/project-context'
 
 export function Toolbar() {
-  const { project, notice, save, openText, reframe } = useProject()
+  const { project, notice, save, openText, reframe, undo, redo, canUndo, canRedo } = useProject()
   const input = useRef<HTMLInputElement>(null)
 
   function onFile(event: ChangeEvent<HTMLInputElement>) {
@@ -22,11 +22,20 @@ export function Toolbar() {
         <span>Dressing · un mur</span>
       </div>
       <p className={notice ? 'status error' : 'status'} role="status">
-        {notice ?? 'Prototype. Les cotes suivent les règles par défaut.'}
+        {notice ?? 'Les cotes suivent les règles enregistrées dans ce projet.'}
       </p>
       <div className="toolbar-actions">
+        <button type="button" className="secondary" onClick={undo} disabled={!canUndo}>
+          Annuler
+        </button>
+        <button type="button" className="secondary" onClick={redo} disabled={!canRedo}>
+          Rétablir
+        </button>
         <button type="button" className="secondary" onClick={reframe}>
           Recentrer la vue
+        </button>
+        <button type="button" className="secondary" onClick={() => { window.location.hash = '#cuisine' }}>
+          Cuisine
         </button>
         <button type="button" className="secondary" onClick={() => input.current?.click()}>
           Ouvrir un projet

@@ -3,9 +3,11 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { DoubleSide } from 'three'
 import { doorCountForCaisson, layoutCaisson, usableHeight } from '../domain/layout'
-import { BACK, PANEL, RAIL_DIAMETER, doorFinishById, finishById, splitEven } from '../domain/rules'
 import type { CaissonLayout } from '../domain/layout'
+import type { RuleProfile } from '../domain/profile'
+import { RAIL_DIAMETER, doorFinishById, finishById, splitEven } from '../domain/rules'
 import type { Caisson, FinishId, Project } from '../domain/types'
+import type { RuleField } from './rule-indicators'
 
 type Rig = {
   target: { set: (x: number, y: number, z: number) => void }
@@ -19,6 +21,8 @@ export type PartPick = {
   role: string
   length: number | null
   width: number | null
+  /** When set, every part with one of these roles lights up, on every caisson. */
+  roles?: string[]
 }
 
 export function Scene({
@@ -29,6 +33,8 @@ export function Scene({
   view,
   onSelect,
   highlight = null,
+  revealDrawers = false,
+  guide = null,
 }: {
   project: Project
   selectedId: string
@@ -37,6 +43,8 @@ export function Scene({
   view: SceneView
   onSelect: (id: string) => void
   highlight?: PartPick | null
+  revealDrawers?: boolean
+  guide?: RuleField | null
 }) {
   const focusY = (project.wall.socle + usableHeight(project.wall) / 2) / 1000
   const span = project.wall.width / 1000
@@ -49,7 +57,7 @@ export function Scene({
       <directionalLight position={[-4, 2, -2]} intensity={0.28} />
       <group scale={0.001} position={[-project.wall.width / 2000, 0, 0]}>
         <Room project={project} />
-        <Furniture project={project} selectedId={selectedId} doorsOpen={doorsOpen} view={view} onSelect={onSelect} highlight={highlight} />
+        <Furniture project={project} selectedId={selectedId} doorsOpen={doorsOpen} view={view} onSelect={onSelect} highlight={highlight} revealDrawers={revealDrawers} guide={guide ?? null} />
       </group>
       <OrbitControls makeDefault maxPolarAngle={Math.PI / 2.04} minDistance={0.7} maxDistance={16} />
       <CameraRig span={span} focusY={focusY} token={frameToken} />
@@ -100,6 +108,8 @@ function Furniture({
   view,
   onSelect,
   highlight,
+  revealDrawers,
+  guide,
 }: {
   project: Project
   selectedId: string
@@ -107,10 +117,16 @@ function Furniture({
   view: SceneView
   onSelect: (id: string) => void
   highlight: PartPick | null
+  revealDrawers: boolean
+  guide: RuleField | null
 }) {
   const color = finishById(project.finish).color
   const finish = project.finish
   let cursor = 0
+  const hangingHost =
+    project.caissons.find((caisson) => caisson.id === selectedId && caisson.rail !== 'aucune') ??
+    project.caissons.find((caisson) => caisson.rail !== 'aucune') ??
+    project.caissons.find((caisson) => caisson.id === selectedId)
   const showContents = view === 'interior' || view === 'facade'
   const showDoors = view === 'facade'
   const focus = view === 'boxes' || view === 'interior'
@@ -131,6 +147,7 @@ function Furniture({
               index={index}
               x={x}
               wall={project.wall}
+              rules={project.rules}
               color={color}
               finish={finish}
               doorsOpen={doorsOpen}
@@ -139,6 +156,9 @@ function Furniture({
               focus={focus && !highlight}
               selected={caisson.id === selectedId}
               highlight={highlight}
+              revealDrawers={revealDrawers}
+              guide={guide}
+              guideHostId={hangingHost?.id ?? null}
               onSelect={() => onSelect(caisson.id)}
             />
           )
@@ -149,6 +169,8 @@ function Furniture({
 }
 
 function Envelope({ project, color, finish }: { project: Project; color: string; finish: FinishId }) {
+  const PANEL = project.rules.carcassMm
+  const BACK = project.rules.backMm
   const height = usableHeight(project.wall)
   const { width, depth, socle } = project.wall
   const inner = width - 2 * PANEL
@@ -167,6 +189,7 @@ function Envelope({ project, color, finish }: { project: Project; color: string;
 function Plinth({ project, color, highlight }: { project: Project; color: string; highlight: PartPick | null }) {
   const socle = project.wall.socle
   if (socle <= 0) return null
+  const PANEL = project.rules.carcassMm
   const { width, depth } = project.wall
   const returnDepth = depth - PANEL
   return (
@@ -183,6 +206,7 @@ function CaissonMesh({
   index,
   x,
   wall,
+  rules,
   color,
   finish,
   doorsOpen,
@@ -191,12 +215,16 @@ function CaissonMesh({
   focus,
   selected,
   highlight,
+  revealDrawers,
+  guide,
+  guideHostId,
   onSelect,
 }: {
   caisson: Caisson
   index: number
   x: number
   wall: Project['wall']
+  rules: RuleProfile
   color: string
   finish: FinishId
   doorsOpen: boolean
@@ -205,9 +233,15 @@ function CaissonMesh({
   focus: boolean
   selected: boolean
   highlight: PartPick | null
+  revealDrawers: boolean
+  guide: RuleField | null
+  guideHostId: string | null
   onSelect: () => void
 }) {
-  const layout = layoutCaisson(wall, caisson)
+  const layout = layoutCaisson(wall, caisson, rules)
+  const PANEL = rules.carcassMm
+  const BACK = rules.backMm
+  const SHELF = rules.shelfMm
   const depth = wall.depth
   const socle = wall.socle
   const boxHeight = layout.boxHeight
@@ -236,7 +270,7 @@ function CaissonMesh({
         <Panel
           key={`${caisson.id}-shelf-${shelfIndex}`}
           position={[PANEL + inner / 2, (shelf.bottom + shelf.top) / 2, BACK + layout.shelfDepth / 2]}
-          size={[inner, PANEL, layout.shelfDepth]}
+          size={[inner, SHELF, layout.shelfDepth]}
           color={color}
           tone={tone('étagère', inner, layout.shelfDepth)}
         />
@@ -244,7 +278,7 @@ function CaissonMesh({
       {showContents && layout.closingShelf && (
         <Panel
           position={[PANEL + inner / 2, (layout.closingShelf.bottom + layout.closingShelf.top) / 2, BACK + layout.shelfDepth / 2]}
-          size={[inner, PANEL, layout.shelfDepth]}
+          size={[inner, SHELF, layout.shelfDepth]}
           color={color}
           tone={tone('dessus tiroirs', inner, layout.shelfDepth)}
         />
@@ -255,8 +289,22 @@ function CaissonMesh({
           <meshStandardMaterial {...metalLook(pieceTone(highlight, index, 'tringle', inner, inner))} />
         </mesh>
       ))}
-      {showContents && <Drawers layout={layout} width={caisson.width} depth={depth} color={color} tone={(role, along, across) => tone(role, along, across)} />}
-      {showDoors && caisson.door !== 'aucune' && (
+      {showContents && <Drawers layout={layout} width={caisson.width} depth={depth} color={color} panel={PANEL} back={BACK} reveal={revealDrawers} tone={(role, along, across) => tone(role, along, across)} />}
+      {showDoors && caisson.door === 'coulissante' && (
+        <SlidingDoors
+          width={caisson.width}
+          height={boxHeight}
+          depth={depth}
+          color={doorFinishById(caisson.doorFinish).color}
+          glass={caisson.doorFinish === 'verre'}
+          open={doorsOpen}
+          overlap={rules.slidingOverlapMm}
+          panel={PANEL}
+          caissonIndex={index}
+          highlight={highlight}
+        />
+      )}
+      {showDoors && caisson.door !== 'aucune' && caisson.door !== 'coulissante' && (
         <HingedDoors
           width={caisson.width}
           height={boxHeight}
@@ -266,8 +314,21 @@ function CaissonMesh({
           open={doorsOpen}
           caissonIndex={index}
           highlight={highlight}
+          panel={PANEL}
+          doorSplitMm={rules.doorSplitMm}
         />
       )}
+      <RuleGuide
+        guide={guide}
+        caisson={caisson}
+        selected={selected}
+        host={caisson.id === guideHostId}
+        layout={layout}
+        rules={rules}
+        boxHeight={boxHeight}
+        depth={depth}
+        panel={PANEL}
+      />
       <mesh position={[caisson.width / 2, boxHeight / 2, depth + 40]} onClick={(event) => { event.stopPropagation(); onSelect() }}>
         <planeGeometry args={[caisson.width, boxHeight]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -276,19 +337,99 @@ function CaissonMesh({
   )
 }
 
+function RuleGuide({
+  guide,
+  caisson,
+  selected,
+  host,
+  layout,
+  rules,
+  boxHeight,
+  depth,
+  panel,
+}: {
+  guide: RuleField | null
+  caisson: Caisson
+  selected: boolean
+  host: boolean
+  layout: CaissonLayout
+  rules: RuleProfile
+  boxHeight: number
+  depth: number
+  panel: number
+}) {
+  if (guide === 'doorSplitMm' && (caisson.door === 'battante' || caisson.door === 'vitree')) {
+    const at = Math.min(rules.doorSplitMm, caisson.width)
+    const oneDoor = caisson.width < rules.doorSplitMm
+    return (
+      <group>
+        <mesh position={[caisson.width / 2, boxHeight + 28, depth + 24]}>
+          <boxGeometry args={[caisson.width, 8, 8]} />
+          <meshBasicMaterial color="#d5e4dc" />
+        </mesh>
+        <mesh position={[at, boxHeight + 28, depth + 32]}>
+          <boxGeometry args={[16, 78, 16]} />
+          <meshBasicMaterial color={oneDoor ? '#8d2f2a' : '#1d4a42'} />
+        </mesh>
+      </group>
+    )
+  }
+  if (guide === 'slidingOverlapMm' && selected) {
+    return (
+      <mesh position={[caisson.width / 2, boxHeight / 2, depth + panel + 28]}>
+        <boxGeometry args={[Math.max(8, rules.slidingOverlapMm), Math.max(40, boxHeight - 48), 18]} />
+        <meshBasicMaterial color="#1d4a42" transparent opacity={0.55} />
+      </mesh>
+    )
+  }
+  if ((guide === 'hangingMinMm' || guide === 'hangingDefaultMm' || guide === 'hangingMaxMm') && host) {
+    const axis = layout.rails[0]?.axis ?? layout.interiorTop - 80
+    const gap = caisson.rail === 'aucune' ? rules.hangingDefaultMm : caisson.hangingGap
+    const inner = Math.max(40, caisson.width - 2 * rules.carcassMm)
+    const ticks = [
+      { id: 'min', mm: rules.hangingMinMm, hot: guide === 'hangingMinMm' },
+      { id: 'default', mm: rules.hangingDefaultMm, hot: guide === 'hangingDefaultMm' },
+      { id: 'max', mm: rules.hangingMaxMm, hot: guide === 'hangingMaxMm' },
+    ]
+    return (
+      <group>
+        <mesh position={[rules.carcassMm + inner / 2, axis - gap / 2, depth * 0.42]}>
+          <boxGeometry args={[inner * 0.28, Math.max(8, gap), 40]} />
+          <meshBasicMaterial color="#1d4a42" transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+        {ticks.map((tick) => (
+          <mesh key={tick.id} position={[rules.carcassMm + inner / 2, axis - tick.mm, depth * 0.5]}>
+            <boxGeometry args={[inner * 0.8, tick.hot ? 18 : 5, 24]} />
+            <meshBasicMaterial color={tick.hot ? '#1d4a42' : '#8aa89a'} />
+          </mesh>
+        ))}
+      </group>
+    )
+  }
+  return null
+}
+
 function Drawers({
   layout,
   width,
   depth,
   color,
+  panel,
+  back,
+  reveal,
   tone,
 }: {
   layout: CaissonLayout
   width: number
   depth: number
   color: string
+  panel: number
+  back: number
+  reveal: boolean
   tone: (role: string, along: number, across: number) => PanelTone
 }) {
+  const PANEL = panel
+  const BACK = back
   const inner = layout.interiorWidth
   const board = layout.drawerThickness
   const boxWidth = inner - 2 * board
@@ -296,6 +437,7 @@ function Drawers({
   const leftX = PANEL + board / 2
   const rightX = width - PANEL - board / 2
   const sideZ = depth - board - boxDepth / 2
+  const pull = reveal ? Math.round(boxDepth * 0.62) : 0
   return (
     <group>
       {layout.drawers.map((drawer, index) => {
@@ -303,12 +445,13 @@ function Drawers({
         const boxMidY = boxBottom + drawer.boxHeight / 2
         const frontZ = depth - board - board / 2
         const backZ = depth - board - boxDepth + board / 2
-        const showBox = tone('côté tiroir', boxDepth, drawer.boxHeight) === 'hot'
+        const showBox = reveal
+          || tone('côté tiroir', boxDepth, drawer.boxHeight) === 'hot'
           || tone('devant tiroir', boxWidth, drawer.boxHeight) === 'hot'
           || tone('derrière tiroir', boxWidth, drawer.boxHeight) === 'hot'
           || tone('fond tiroir', boxWidth, boxDepth - 2 * board) === 'hot'
         return (
-          <group key={index}>
+          <group key={index} position={[0, 0, pull]}>
             <Panel
               position={[PANEL + inner / 2, drawer.bottom + drawer.height / 2, depth - board / 2]}
               size={[inner - 2, Math.max(8, drawer.height - 2), board]}
@@ -336,13 +479,15 @@ function Drawers({
   )
 }
 
-function HingedDoors({
+function SlidingDoors({
   width,
   height,
   depth,
   color,
   glass,
   open,
+  overlap,
+  panel,
   caissonIndex,
   highlight,
 }: {
@@ -352,10 +497,70 @@ function HingedDoors({
   color: string
   glass: boolean
   open: boolean
+  overlap: number
+  panel: number
   caissonIndex: number
   highlight: PartPick | null
 }) {
-  const count = doorCountForCaisson(width)
+  const leaves = splitEven(width + overlap, 2)
+  const shift = open ? Math.round(leaves[0] * 0.42) : 0
+  const fronts: { leaf: number; x: number; z: number }[] = [
+    { leaf: leaves[0], x: leaves[0] / 2 - shift, z: depth + panel / 2 },
+    { leaf: leaves[1], x: width - leaves[1] / 2 + shift, z: depth + panel + panel / 2 },
+  ]
+  return (
+    <group>
+      {fronts.map((front) => (
+        <group key={front.z} position={[front.x, height / 2, front.z]}>
+          {glass ? (
+            <group position={[-front.leaf / 2, 0, 0]}>
+              <GlassLeaf
+                width={Math.max(8, front.leaf - 2)}
+                height={height - 2}
+                hingeLeft
+                panel={panel}
+                tone={pieceTone(highlight, caissonIndex, 'porte', height, front.leaf)}
+              />
+            </group>
+          ) : (
+            <Panel
+              position={[0, 0, 0]}
+              size={[Math.max(8, front.leaf - 2), height - 2, panel]}
+              color={color}
+              tone={pieceTone(highlight, caissonIndex, 'porte', height, front.leaf)}
+            />
+          )}
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function HingedDoors({
+  width,
+  height,
+  depth,
+  color,
+  glass,
+  open,
+  caissonIndex,
+  highlight,
+  panel,
+  doorSplitMm,
+}: {
+  width: number
+  height: number
+  depth: number
+  color: string
+  glass: boolean
+  open: boolean
+  caissonIndex: number
+  highlight: PartPick | null
+  panel: number
+  doorSplitMm: number
+}) {
+  const PANEL = panel
+  const count = doorCountForCaisson(width, doorSplitMm)
   const widths = splitEven(width, count)
   let cursor = 0
   return (
@@ -371,6 +576,7 @@ function HingedDoors({
                 width={Math.max(8, doorWidth - 2)}
                 height={height - 2}
                 hingeLeft={hingeLeft}
+                panel={PANEL}
                 tone={pieceTone(highlight, caissonIndex, 'porte', height, doorWidth)}
               />
             ) : (
@@ -394,13 +600,16 @@ function GlassLeaf({
   width,
   height,
   hingeLeft,
+  panel,
   tone,
 }: {
   width: number
   height: number
   hingeLeft: boolean
+  panel: number
   tone: PanelTone
 }) {
+  const PANEL = panel
   const frame = Math.min(36, width / 6, height / 10)
   const innerW = Math.max(8, width - frame * 2)
   const innerH = Math.max(8, height - frame * 2)
@@ -465,6 +674,7 @@ type PanelTone = 'plain' | 'hot' | 'dim'
 
 function pieceTone(pick: PartPick | null, caissonIndex: number, role: string, along: number, across: number): PanelTone {
   if (!pick) return 'plain'
+  if (pick.roles && pick.roles.length > 0) return pick.roles.includes(role) ? 'hot' : 'dim'
   if (pick.caissonIndex !== caissonIndex || pick.role !== role) return 'dim'
   if (pick.width == null) return pick.length === along || pick.length === across ? 'hot' : 'dim'
   if (pick.length == null) return 'hot'

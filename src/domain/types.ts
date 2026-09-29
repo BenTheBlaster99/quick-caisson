@@ -1,5 +1,7 @@
+import type { RuleProfile } from './profile'
+
 export type RailMode = 'aucune' | 'haute' | 'basse' | 'double'
-export type DoorMode = 'aucune' | 'battante' | 'vitree'
+export type DoorMode = 'aucune' | 'battante' | 'vitree' | 'coulissante'
 export type FinishId = 'blanc' | 'chene' | 'anthracite'
 export type DoorFinishId = FinishId | 'verre'
 export type DrawerThickness = 16 | 18
@@ -26,14 +28,18 @@ export type Caisson = {
   door: DoorMode
   doorFinish: DoorFinishId
   pantalonniere: boolean
+  /** When true, wall and neighbour edits leave this width alone. */
+  locked: boolean
 }
 
 export type Project = {
   format: 'caisson-project'
-  version: 1
+  version: 2
   wall: Wall
   finish: FinishId
   caissons: Caisson[]
+  /** Construction snapshot. Reopening a file uses this copy, not today's defaults. */
+  rules: RuleProfile
 }
 
 export type CutRow = {
