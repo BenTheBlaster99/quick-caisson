@@ -433,6 +433,16 @@ button:disabled {
   color: white;
 }
 
+.segment button .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  vertical-align: 1px;
+}
+
 .stepper button {
   width: 36px;
   height: 36px;

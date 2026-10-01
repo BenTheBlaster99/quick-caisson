@@ -5,13 +5,19 @@ import { addKitchenColumn, canCorrectIssue, inspectKitchen, removeKitchenColumn,
 import {
   addOpening,
   defaultKitchen,
+  moveColumn,
+  moveIsland,
   parseKitchen,
   removeOpening,
   serializeKitchen,
+  setIsland,
   setKitchenWall,
+  setRoomDepth,
+  setShape,
+  setWallFinish,
   updateOpening,
 } from '../kitchen/project'
-import type { BaseRole, HandleId, KitchenColumn, KitchenFinishId, KitchenProject, KitchenWall, Opening, OpeningKind, TowerRole, UpperRole } from '../kitchen/types'
+import type { BaseRole, HandleId, KitchenColumn, KitchenFinishId, KitchenProject, KitchenShape, KitchenWall, Opening, OpeningKind, TowerRole, UpperRole, WallFinishId, WallId } from '../kitchen/types'
 
 type Snap = { project: KitchenProject; selectedId: string }
 
@@ -23,6 +29,9 @@ type KitchenApi = {
   canUndo: boolean
   canRedo: boolean
   setWall: (field: keyof KitchenWall, value: number) => boolean
+  setDepth: (depth: number) => boolean
+  setShape: (shape: KitchenShape) => void
+  setIsland: (island: boolean) => void
   setWidth: (width: number) => boolean
   setLocked: (locked: boolean) => void
   setKind: (kind: KitchenColumn['kind']) => void
@@ -31,12 +40,16 @@ type KitchenApi = {
   setUpper: (upper: UpperRole) => void
   setHandle: (handle: HandleId) => void
   setFinish: (finish: KitchenFinishId) => void
+  setWallFinish: (wallId: 'A' | 'B' | 'C' | 'D', finish: WallFinishId) => void
   setName: (name: string) => void
   correct: (columnId: string) => void
-  add: () => void
+  add: (wallId: WallId) => void
   remove: () => void
   select: (id: string) => void
-  addZone: (kind: OpeningKind) => void
+  placeColumn: (id: string, x: number) => void
+  placeOpening: (id: string, patch: { x: number; bottom: number }) => void
+  placeIsland: (x: number, z: number) => void
+  addZone: (kind: OpeningKind, wallId?: WallId) => void
   setZone: (id: string, patch: Partial<Pick<Opening, 'x' | 'width' | 'bottom' | 'height'>>) => boolean
   removeZone: (id: string) => void
   undo: () => void
@@ -140,6 +153,29 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setNotice(null)
         return true
       },
+      setDepth(depth) {
+        const result = setRoomDepth(project, depth)
+        if (!result.ok) {
+          setNotice(result.error)
+          return false
+        }
+        remember()
+        setProject(result.project)
+        setNotice(null)
+        return true
+      },
+      setShape(shape) {
+        if (project.room.shape === shape) return
+        remember()
+        setProject(setShape(project, shape))
+        setNotice(null)
+      },
+      setIsland(island) {
+        if (project.room.island === island) return
+        remember()
+        setProject(setIsland(project, island))
+        setNotice(null)
+      },
       setWidth(width) {
         const index = project.columns.findIndex((column) => column.id === selected.id)
         const result = setColumnWidth(project, index, width)
@@ -188,6 +224,12 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setProject({ ...project, finish })
         setNotice(null)
       },
+      setWallFinish(wallId, finish) {
+        if (project.room.finishes[wallId] === finish) return
+        remember()
+        setProject(setWallFinish(project, wallId, finish))
+        setNotice(null)
+      },
       setName(name) {
         const next = name.trim() || 'Cuisine'
         if (next === project.name) return
@@ -209,8 +251,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         })
         setNotice(null)
       },
-      add() {
-        const result = addKitchenColumn(project.columns, createId)
+      add(wallId) {
+        const result = addKitchenColumn(project, wallId, createId)
         if (!result.ok) {
           setNotice(result.error)
           return
@@ -218,6 +260,32 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         remember()
         setProject({ ...project, columns: result.columns })
         setSelectedId(result.columns[result.selectedIndex].id)
+        setNotice(null)
+      },
+      placeColumn(id, x) {
+        const column = project.columns.find((item) => item.id === id)
+        if (!column || column.locked || column.x === x) return
+        remember()
+        setProject(moveColumn(project, id, x))
+        setNotice(null)
+      },
+      placeOpening(id, patch) {
+        const result = updateOpening(project, id, patch)
+        if (!result.ok) {
+          setNotice(result.error)
+          return
+        }
+        const current = project.openings.find((opening) => opening.id === id)
+        if (current && current.x === result.project.openings.find((opening) => opening.id === id)?.x && current.bottom === result.project.openings.find((opening) => opening.id === id)?.bottom) return
+        remember()
+        setProject(result.project)
+        setNotice(null)
+      },
+      placeIsland(x, z) {
+        const next = moveIsland(project, x, z)
+        if (next.room.islandX === project.room.islandX && next.room.islandZ === project.room.islandZ) return
+        remember()
+        setProject(next)
         setNotice(null)
       },
       remove() {
@@ -235,8 +303,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       select(id) {
         setSelectedId(id)
       },
-      addZone(kind) {
-        const result = addOpening(project, kind)
+      addZone(kind, wallId = 'A') {
+        const result = addOpening(project, kind, wallId)
         if (!result.ok) {
           setNotice(result.error)
           return

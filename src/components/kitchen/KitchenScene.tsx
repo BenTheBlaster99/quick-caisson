@@ -1,17 +1,26 @@
 import { ContactShadows, Edges, OrbitControls } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
-import { useEffect, useRef } from 'react'
-import { DoubleSide } from 'three'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { DoubleSide, PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import { inspectKitchen, placeColumns, upperSpan, worktopRuns, worktopTop, type PlacedColumn } from '../../kitchen/layout'
-import { kitchenFinish } from '../../kitchen/finishes'
-import type { HandleId, KitchenProject, Opening } from '../../kitchen/types'
+import { kitchenFinish, wallFinish } from '../../kitchen/finishes'
+import { mountRun, wallLength, builtWalls } from '../../kitchen/room'
+import { moveColumn, moveIsland } from '../../kitchen/project'
+import type { HandleId, KitchenProject, Opening, WallId } from '../../kitchen/types'
 
 type Rig = {
   target: { set: (x: number, y: number, z: number) => void }
   update: () => void
 }
 
-export type KitchenCamera = 'perspective' | 'face' | 'top'
+export type KitchenCamera = 'perspective' | 'fond' | 'gauche' | 'droit' | 'top'
+
+function nearWall(mode: KitchenCamera): WallId | null {
+  if (mode === 'perspective' || mode === 'fond') return 'D'
+  if (mode === 'gauche') return 'C'
+  if (mode === 'droit') return 'B'
+  return null
+}
 
 export function KitchenScene({
   project,
@@ -19,115 +28,446 @@ export function KitchenScene({
   frameToken,
   cameraMode,
   onSelect,
+  onMoveColumn,
+  onMoveOpening,
+  onMoveIsland,
 }: {
   project: KitchenProject
   selectedId: string
   frameToken: number
   cameraMode: KitchenCamera
   onSelect: (id: string) => void
+  onMoveColumn: (id: string, x: number) => void
+  onMoveOpening: (id: string, patch: { x: number; bottom: number }) => void
+  onMoveIsland: (x: number, z: number) => void
 }) {
-  const span = project.wall.width / 1000
-  const eye = worktopTop(project.wall) / 1000
+  return (
+    <Canvas camera={{ position: [2.2, 2.1, 6.4], fov: 46, near: 0.05, far: 80 }} dpr={[1, 1.75]} gl={{ antialias: true }}>
+      <World
+        project={project}
+        selectedId={selectedId}
+        frameToken={frameToken}
+        cameraMode={cameraMode}
+        onSelect={onSelect}
+        onMoveColumn={onMoveColumn}
+        onMoveOpening={onMoveOpening}
+        onMoveIsland={onMoveIsland}
+      />
+    </Canvas>
+  )
+}
+
+function World({
+  project,
+  selectedId,
+  frameToken,
+  cameraMode,
+  onSelect,
+  onMoveColumn,
+  onMoveOpening,
+  onMoveIsland,
+}: {
+  project: KitchenProject
+  selectedId: string
+  frameToken: number
+  cameraMode: KitchenCamera
+  onSelect: (id: string) => void
+  onMoveColumn: (id: string, x: number) => void
+  onMoveOpening: (id: string, patch: { x: number; bottom: number }) => void
+  onMoveIsland: (x: number, z: number) => void
+}) {
+  const [preview, setPreview] = useState<KitchenProject | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const shown = preview ?? project
+  const span = Math.max(shown.wall.width, shown.room.depth) / 1000
+  const eye = worktopTop(shown.wall) / 1000
+  const hidden = nearWall(cameraMode)
   const marks = new Map<string, 'refus' | 'attention'>()
-  for (const issue of inspectKitchen(project).issues) {
+  for (const issue of inspectKitchen(shown).issues) {
     if (!issue.columnId) continue
     const current = marks.get(issue.columnId)
     if (issue.level === 'refus' || current !== 'refus') marks.set(issue.columnId, issue.level)
   }
 
   return (
-    <Canvas camera={{ position: [1.2, 1.45, 3.2], fov: 35 }} dpr={[1, 1.75]} gl={{ antialias: true }}>
+    <>
       <color attach="background" args={['#ece7df']} />
       <ambientLight intensity={0.72} />
       <directionalLight position={[3.2, 5.4, 4]} intensity={1.45} />
       <directionalLight position={[-3, 2.2, -1]} intensity={0.22} />
-      <group scale={0.001} position={[-project.wall.width / 2000, 0, 0]}>
-        <Room project={project} />
-        {project.openings.map((opening) => (
-          <OpeningMark key={opening.id} opening={opening} />
-        ))}
-        <KitchenFurniture project={project} selectedId={selectedId} marks={marks} onSelect={onSelect} />
-      </group>
-      <ContactShadows position={[0, 0.001, 0.28]} opacity={0.32} scale={Math.max(6, span + 1.4)} blur={2.2} far={1.4} color="#3a342c" />
-      <OrbitControls makeDefault maxPolarAngle={cameraMode === 'top' ? Math.PI : Math.PI / 2.02} minDistance={0.6} maxDistance={16} />
-      <CameraRig span={span} eye={eye} token={frameToken} mode={cameraMode} />
-    </Canvas>
+      <DragBridge
+        project={project}
+        setPreview={setPreview}
+        setDragging={setDragging}
+        onMoveColumn={onMoveColumn}
+        onMoveOpening={onMoveOpening}
+        onMoveIsland={onMoveIsland}
+      >
+        <group scale={0.001} position={[-shown.wall.width / 2000, 0, -shown.room.depth / 2000]}>
+          <Room project={shown} hidden={hidden} />
+          {shown.openings.filter((opening) => opening.wallId !== 'ilot' && opening.wallId !== hidden && builtWalls(shown.room.shape, shown.openings).includes(opening.wallId)).map((opening) => (
+            <Mount key={opening.id} project={shown} wallId={opening.wallId} along={opening.x} size={opening.width}>
+              <OpeningMark project={shown} opening={opening} />
+            </Mount>
+          ))}
+          <KitchenFurniture project={shown} selectedId={selectedId} marks={marks} onSelect={onSelect} />
+        </group>
+      </DragBridge>
+      <ContactShadows position={[0, 0.001, 0]} opacity={0.32} scale={Math.max(6, span + 1.4)} blur={2.2} far={1.4} color="#3a342c" />
+      <OrbitControls makeDefault enabled={!dragging} maxPolarAngle={cameraMode === 'top' ? Math.PI / 2.2 : Math.PI / 2.02} minDistance={1.4} maxDistance={32} />
+      <CameraRig width={shown.wall.width} depth={shown.room.depth} eye={eye} token={frameToken} mode={cameraMode} />
+    </>
   )
 }
 
-function CameraRig({ span, eye, token, mode }: { span: number; eye: number; token: number; mode: KitchenCamera }) {
+function CameraRig({ width, depth, eye, token, mode }: { width: number; depth: number; eye: number; token: number; mode: KitchenCamera }) {
   const camera = useThree((state) => state.camera)
   const controls = useThree((state) => state.controls) as Rig | null
-  const spanRef = useRef(span)
-  const eyeRef = useRef(eye)
-  spanRef.current = span
-  eyeRef.current = eye
+  const sizeRef = useRef({ width, depth, eye })
+  sizeRef.current = { width, depth, eye }
 
   useEffect(() => {
-    const width = spanRef.current
-    const focusY = Math.max(0.9, eyeRef.current + 0.15)
-    const pose = mode === 'face'
-      ? { x: 0, y: focusY, z: Math.max(3.4, width * 1.25), ty: focusY }
-      : mode === 'top'
-        ? { x: 0, y: Math.max(4.2, width * 1.35), z: 0.02, ty: 0.2 }
-        : { x: width * 0.28, y: focusY + 0.35, z: Math.max(2.2, width * 0.72), ty: focusY }
-    if (controls) controls.target.set(pose.x * 0.15, pose.ty, 0)
+    const w = sizeRef.current.width / 1000
+    const d = sizeRef.current.depth / 1000
+    const focusY = Math.max(1.05, sizeRef.current.eye + 0.25)
+    const reach = Math.max(w, d) * 0.72 + 2.8
+    const pose = mode === 'fond'
+      ? { x: 0, y: focusY + 0.35, z: d / 2 + reach, tx: 0, ty: focusY, tz: -d * 0.08 }
+      : mode === 'gauche'
+        ? { x: w / 2 + reach, y: focusY + 0.45, z: d * 0.08, tx: -w * 0.08, ty: focusY, tz: 0 }
+        : mode === 'droit'
+          ? { x: -w / 2 - reach, y: focusY + 0.45, z: d * 0.08, tx: w * 0.08, ty: focusY, tz: 0 }
+          : mode === 'top'
+            ? { x: 0, y: Math.max(w, d) * 2.15 + 1.2, z: 0.04, tx: 0, ty: 0, tz: 0 }
+            : { x: w * 0.42, y: focusY + 1.15, z: d / 2 + reach, tx: -w * 0.06, ty: focusY * 0.72, tz: -d * 0.12 }
+    if (camera instanceof PerspectiveCamera) {
+      camera.fov = mode === 'top' ? 38 : 46
+      camera.updateProjectionMatrix()
+    }
     camera.position.set(pose.x, pose.y, pose.z)
-    camera.lookAt(0, pose.ty, 0)
+    camera.lookAt(pose.tx, pose.ty, pose.tz)
+    if (controls) controls.target.set(pose.tx, pose.ty, pose.tz)
     controls?.update()
   }, [camera, controls, mode, token])
 
   return null
 }
 
-function Room({ project }: { project: KitchenProject }) {
-  const { width, ceilingHeight, baseDepth } = project.wall
+type DragSession =
+  | { kind: 'column'; id: string; wallId: WallId; grab: number; origin: number }
+  | { kind: 'opening'; id: string; wallId: WallId; grabAlong: number; grabY: number; originX: number; originBottom: number }
+  | { kind: 'island'; grabX: number; grabZ: number; originX: number; originZ: number }
+
+const DragContext = createContext<(drag: DragSession) => void>(() => {})
+
+function DragBridge({
+  project,
+  setPreview,
+  setDragging,
+  onMoveColumn,
+  onMoveOpening,
+  onMoveIsland,
+  children,
+}: {
+  project: KitchenProject
+  setPreview: (project: KitchenProject | null) => void
+  setDragging: (dragging: boolean) => void
+  onMoveColumn: (id: string, x: number) => void
+  onMoveOpening: (id: string, patch: { x: number; bottom: number }) => void
+  onMoveIsland: (x: number, z: number) => void
+  children: ReactNode
+}) {
+  const camera = useThree((state) => state.camera)
+  const gl = useThree((state) => state.gl)
+  const controls = useThree((state) => state.controls) as { enabled: boolean } | null
+  const drag = useRef<DragSession | null>(null)
+  const base = useRef(project)
+  const latest = useRef(project)
+  const raycaster = useMemo(() => new Raycaster(), [])
+  const pointer = useMemo(() => new Vector2(), [])
+  const handlers = useRef({ onMoveColumn, onMoveOpening, onMoveIsland, setPreview, setDragging })
+  handlers.current = { onMoveColumn, onMoveOpening, onMoveIsland, setPreview, setDragging }
+  base.current = drag.current ? base.current : project
+
+  function begin(session: DragSession) {
+    drag.current = session
+    base.current = project
+    latest.current = project
+    if (controls) controls.enabled = false
+    setDragging(true)
+  }
+
+  useEffect(() => {
+    const dom = gl.domElement
+    function move(event: PointerEvent) {
+      const session = drag.current
+      if (!session) return
+      const rect = dom.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera(pointer, camera)
+      const source = base.current
+      const hit = new Vector3()
+      const steep = Math.abs(raycaster.ray.direction.y) > 0.82
+      const plane = session.kind === 'island' || steep
+        ? new Plane(new Vector3(0, 1, 0), session.kind === 'island' ? -worktopTop(source.wall) / 1000 : 0)
+        : wallPlane(session.kind === 'column' ? session.wallId : session.wallId, source.wall.width, source.room.depth)
+      if (!raycaster.ray.intersectPlane(plane, hit)) return
+      const room = roomOf(hit, source.wall.width, source.room.depth)
+      let next = source
+      if (session.kind === 'column') {
+        const along = alongOf(session.wallId, room, source.room.islandX)
+        next = moveColumn(source, session.id, along - session.grab)
+      } else if (session.kind === 'opening') {
+        const along = alongOf(session.wallId, room, source.room.islandX)
+        next = slideOpening(source, session.id, along - session.grabAlong, room.y - session.grabY)
+      } else {
+        next = moveIsland(source, room.x - session.grabX, room.z - session.grabZ)
+      }
+      latest.current = next
+      handlers.current.setPreview(next)
+    }
+    function up() {
+      const session = drag.current
+      if (!session) return
+      drag.current = null
+      if (controls) controls.enabled = true
+      const next = latest.current
+      handlers.current.setDragging(false)
+      handlers.current.setPreview(null)
+      if (session.kind === 'column') {
+        const column = next.columns.find((item) => item.id === session.id)
+        if (column && Math.abs(column.x - session.origin) >= 2) handlers.current.onMoveColumn(column.id, column.x)
+      } else if (session.kind === 'opening') {
+        const opening = next.openings.find((item) => item.id === session.id)
+        if (opening && (Math.abs(opening.x - session.originX) >= 2 || Math.abs(opening.bottom - session.originBottom) >= 2)) {
+          handlers.current.onMoveOpening(opening.id, { x: opening.x, bottom: opening.bottom })
+        }
+      } else if (Math.abs(next.room.islandX - session.originX) >= 2 || Math.abs(next.room.islandZ - session.originZ) >= 2) {
+        handlers.current.onMoveIsland(next.room.islandX, next.room.islandZ)
+      }
+    }
+    dom.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      dom.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [camera, controls, gl, pointer, raycaster])
+
+  return <DragContext.Provider value={begin}>{children}</DragContext.Provider>
+}
+
+function roomOf(point: Vector3, width: number, depth: number) {
+  return {
+    x: (point.x + width / 2000) * 1000,
+    y: point.y * 1000,
+    z: (point.z + depth / 2000) * 1000,
+  }
+}
+
+function alongOf(wallId: WallId, room: { x: number; z: number }, islandX: number) {
+  if (wallId === 'B' || wallId === 'C') return room.z
+  if (wallId === 'ilot') return room.x - islandX
+  return room.x
+}
+
+function wallPlane(wallId: WallId, width: number, depth: number) {
+  if (wallId === 'B') return new Plane(new Vector3(1, 0, 0), width / 2000)
+  if (wallId === 'C') return new Plane(new Vector3(1, 0, 0), -width / 2000)
+  if (wallId === 'D') return new Plane(new Vector3(0, 0, 1), -depth / 2000)
+  return new Plane(new Vector3(0, 0, 1), depth / 2000)
+}
+
+function slideOpening(project: KitchenProject, id: string, x: number, bottom: number): KitchenProject {
+  const opening = project.openings.find((item) => item.id === id)
+  if (!opening) return project
+  const length = wallLength(project, opening.wallId)
+  const nextX = Math.round(Math.max(0, Math.min(x, length - opening.width)))
+  const nextBottom = opening.kind === 'porte' ? 0 : Math.round(Math.max(0, Math.min(bottom, project.wall.ceilingHeight - opening.height)))
+  return {
+    ...project,
+    openings: project.openings.map((item) => (item.id === id ? { ...item, x: nextX, bottom: nextBottom } : item)),
+  }
+}
+
+function Mount({ project, wallId, along, size, children }: { project: KitchenProject; wallId: WallId; along: number; size: number; children: ReactNode }) {
+  const mount = mountRun(project.room, project.wall.width, wallId, along, size)
+  return <group position={[mount.x, 0, mount.z]} rotation={[0, mount.rot, 0]}>{children}</group>
+}
+
+function Room({ project, hidden }: { project: KitchenProject; hidden: WallId | null }) {
+  const { width } = project.wall
+  const depth = project.room.depth
+  const thick = 90
+  const walls = builtWalls(project.room.shape, project.openings).filter((wallId) => wallId !== hidden)
+  const x0 = walls.includes('B') ? -thick : 0
+  const x1 = walls.includes('C') ? width + thick : width
+  const z0 = walls.includes('A') ? -thick : 0
+  const z1 = walls.includes('D') ? depth + thick : depth
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[width / 2, 0, baseDepth + 400]} receiveShadow>
-        <planeGeometry args={[width + 2400, 5200]} />
-        <meshStandardMaterial color="#ddd6cc" roughness={1} />
+      <mesh position={[(x0 + x1) / 2, -10, (z0 + z1) / 2]} receiveShadow>
+        <boxGeometry args={[x1 - x0, 20, z1 - z0]} />
+        <meshStandardMaterial color="#e7e0d6" roughness={1} />
       </mesh>
-      <mesh position={[width / 2, ceilingHeight / 2, -8]}>
-        <boxGeometry args={[width + 500, ceilingHeight, 16]} />
-        <meshStandardMaterial color="#f4f1eb" roughness={1} />
-      </mesh>
-      <mesh position={[width / 2, 40, 8]}>
-        <boxGeometry args={[width + 500, 80, 18]} />
-        <meshStandardMaterial color="#e7e1d8" />
-      </mesh>
+      {walls.map((wallId) => (
+        <WallShell key={wallId} project={project} wallId={wallId} />
+      ))}
     </group>
   )
 }
 
-function OpeningMark({ opening }: { opening: Opening }) {
+function WallShell({ project, wallId }: { project: KitchenProject; wallId: WallId }) {
+  const length = wallLength(project, wallId)
+  const ceiling = project.wall.ceilingHeight
+  const holes = project.openings.filter((opening) => opening.wallId === wallId && opening.kind !== 'interdit')
+  return (
+    <group>
+      {wallPieces(length, ceiling, holes).map((piece) => (
+        <WallPiece key={`${piece.x}-${piece.y}-${piece.w}-${piece.h}`} project={project} wallId={wallId} piece={piece} />
+      ))}
+    </group>
+  )
+}
+
+function wallPieces(length: number, ceiling: number, openings: Opening[]) {
+  const pieces: { x: number; y: number; w: number; h: number }[] = []
+  const sorted = [...openings].sort((a, b) => a.x - b.x)
+  let cursor = 0
+  for (const opening of sorted) {
+    const left = Math.max(cursor, Math.min(opening.x, length))
+    if (left > cursor) pieces.push({ x: cursor, y: 0, w: left - cursor, h: ceiling })
+    const start = Math.max(0, Math.min(opening.x, length))
+    const end = Math.max(start, Math.min(opening.x + opening.width, length))
+    if (opening.bottom > 0) pieces.push({ x: start, y: 0, w: end - start, h: Math.min(opening.bottom, ceiling) })
+    const top = Math.min(ceiling, opening.bottom + opening.height)
+    if (top < ceiling && end > start) pieces.push({ x: start, y: top, w: end - start, h: ceiling - top })
+    cursor = Math.max(cursor, end)
+  }
+  if (cursor < length) pieces.push({ x: cursor, y: 0, w: length - cursor, h: ceiling })
+  return pieces.filter((piece) => piece.w > 1 && piece.h > 1)
+}
+
+function WallPiece({
+  project,
+  wallId,
+  piece,
+}: {
+  project: KitchenProject
+  wallId: WallId
+  piece: { x: number; y: number; w: number; h: number }
+}) {
+  const { width } = project.wall
+  const depth = project.room.depth
+  const thick = 90
+  const y = piece.y + piece.h / 2
+  const paint = wallId === 'ilot' ? wallFinish('blanc') : wallFinish(project.room.finishes[wallId])
+  const material = <meshStandardMaterial color={paint.color} roughness={paint.roughness} metalness={paint.metalness} />
+  if (wallId === 'A') {
+    return <mesh position={[piece.x + piece.w / 2, y, -thick / 2]}><boxGeometry args={[piece.w, piece.h, thick]} />{material}</mesh>
+  }
+  if (wallId === 'B') {
+    return <mesh position={[-thick / 2, y, piece.x + piece.w / 2]}><boxGeometry args={[thick, piece.h, piece.w]} />{material}</mesh>
+  }
+  if (wallId === 'C') {
+    return <mesh position={[width + thick / 2, y, piece.x + piece.w / 2]}><boxGeometry args={[thick, piece.h, piece.w]} />{material}</mesh>
+  }
+  return <mesh position={[piece.x + piece.w / 2, y, depth + thick / 2]}><boxGeometry args={[piece.w, piece.h, thick]} />{material}</mesh>
+}
+
+function OpeningMark({ project, opening }: { project: KitchenProject; opening: Opening }) {
+  const begin = useContext(DragContext)
   const y = opening.bottom + opening.height / 2
+  function down(event: { stopPropagation: () => void; point: Vector3 }) {
+    event.stopPropagation()
+    const room = roomOf(event.point, project.wall.width, project.room.depth)
+    const along = alongOf(opening.wallId, room, project.room.islandX)
+    begin({
+      kind: 'opening',
+      id: opening.id,
+      wallId: opening.wallId,
+      grabAlong: along - opening.x,
+      grabY: room.y - y,
+      originX: opening.x,
+      originBottom: opening.bottom,
+    })
+  }
   if (opening.kind === 'interdit') {
     return (
-      <mesh position={[opening.x + opening.width / 2, y, 6]}>
+      <mesh position={[opening.width / 2, y, 6]} onPointerDown={down}>
         <boxGeometry args={[opening.width, opening.height, 8]} />
         <meshStandardMaterial color="#e7b2ac" transparent opacity={0.45} />
       </mesh>
     )
   }
-  const glass = opening.kind === 'fenetre'
+  if (opening.kind === 'porte') return <DoorLeaf opening={opening} onPointerDown={down} />
+  return <WindowLeaf opening={opening} onPointerDown={down} />
+}
+
+function DoorLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDown: (event: { stopPropagation: () => void; point: Vector3 }) => void }) {
+  const leafW = Math.max(40, opening.width - 16)
+  const leafH = Math.max(40, opening.height - 12)
   return (
-    <group position={[opening.x + opening.width / 2, y, 2]}>
-      <mesh>
-        <planeGeometry args={[opening.width - 28, opening.height - 28]} />
-        <meshStandardMaterial color={glass ? '#c5d8e6' : '#f7f4ee'} roughness={0.12} metalness={glass ? 0.08 : 0} side={DoubleSide} />
+    <group position={[0, 0, 8]} onPointerDown={onPointerDown}>
+      <mesh position={[opening.width / 2, opening.height / 2, 0]}>
+        <boxGeometry args={[opening.width + 24, 28, 70]} />
+        <meshStandardMaterial color="#f3efe8" />
       </mesh>
-      {glass && (
-        <mesh>
-          <boxGeometry args={[10, opening.height - 36, 6]} />
-          <meshStandardMaterial color="#f7f4ee" />
+      <mesh position={[10, opening.height / 2, 0]}>
+        <boxGeometry args={[28, opening.height, 70]} />
+        <meshStandardMaterial color="#f3efe8" />
+      </mesh>
+      <mesh position={[opening.width - 10, opening.height / 2, 0]}>
+        <boxGeometry args={[28, opening.height, 70]} />
+        <meshStandardMaterial color="#f3efe8" />
+      </mesh>
+      <group position={[14, 0, 0]} rotation={[0, -0.42, 0]}>
+        <mesh position={[leafW / 2, leafH / 2, 18]} onPointerDown={onPointerDown}>
+          <boxGeometry args={[leafW, leafH, 36]} />
+          <meshStandardMaterial color="#f7f4ee" roughness={0.55} />
         </mesh>
-      )}
-      <FrameBar y={opening.height / 2 - 8} width={opening.width + 16} height={18} />
-      <FrameBar y={-opening.height / 2 + 8} width={opening.width + 16} height={18} />
-      <FrameBar y={0} width={18} height={opening.height} x={-opening.width / 2 + 8} />
-      <FrameBar y={0} width={18} height={opening.height} x={opening.width / 2 - 8} />
-      {glass && <mesh position={[0, -opening.height / 2 - 8, 16]}><boxGeometry args={[opening.width + 40, 16, 28]} /><meshStandardMaterial color="#f7f4ee" /></mesh>}
+        <mesh position={[leafW / 2, leafH * 0.72, 40]}>
+          <boxGeometry args={[leafW * 0.72, leafH * 0.36, 8]} />
+          <meshStandardMaterial color="#efeae3" />
+        </mesh>
+        <mesh position={[leafW / 2, leafH * 0.28, 40]}>
+          <boxGeometry args={[leafW * 0.72, leafH * 0.36, 8]} />
+          <meshStandardMaterial color="#efeae3" />
+        </mesh>
+        <mesh position={[leafW - 70, leafH * 0.48, 62]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[14, 14, 28, 16]} />
+          <meshStandardMaterial color="#c2b8a4" metalness={0.7} roughness={0.28} />
+        </mesh>
+      </group>
+    </group>
+  )
+}
+
+function WindowLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDown: (event: { stopPropagation: () => void; point: Vector3 }) => void }) {
+  const y = opening.bottom + opening.height / 2
+  const paneW = (opening.width - 70) / 2
+  const paneH = opening.height - 56
+  return (
+    <group position={[opening.width / 2, y, 0]} onPointerDown={onPointerDown}>
+      <FrameBar y={opening.height / 2 - 16} width={opening.width + 20} height={32} />
+      <FrameBar y={-opening.height / 2 + 16} width={opening.width + 20} height={32} />
+      <FrameBar y={0} width={32} height={opening.height} x={-opening.width / 2 + 16} />
+      <FrameBar y={0} width={32} height={opening.height} x={opening.width / 2 - 16} />
+      <mesh>
+        <boxGeometry args={[18, opening.height - 48, 28]} />
+        <meshStandardMaterial color="#f7f4ee" />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={[side * (paneW / 2 + 10), 0, 0]}>
+          <planeGeometry args={[Math.max(20, paneW), Math.max(20, paneH)]} />
+          <meshStandardMaterial color="#c5d8e6" roughness={0.08} metalness={0.12} transparent opacity={0.72} side={DoubleSide} />
+        </mesh>
+      ))}
+      <mesh position={[0, -opening.height / 2 - 10, 36]} onPointerDown={onPointerDown}>
+        <boxGeometry args={[opening.width + 80, 28, 90]} />
+        <meshStandardMaterial color="#f7f4ee" />
+      </mesh>
     </group>
   )
 }
@@ -153,33 +493,66 @@ function KitchenFurniture({
   onSelect: (id: string) => void
 }) {
   const finish = kitchenFinish(project.finish)
-  const placed = placeColumns(project.columns)
+  const live = project.columns.filter((column) => column.wallId !== 'ilot' || project.room.island)
+  const placed = placeColumns(live)
   const top = worktopTop(project.wall)
-  const runs = worktopRuns(project.columns)
+  const runs = worktopRuns(live)
   const stone = project.finish === 'noir' ? '#d4cfc6' : '#e7e2d8'
+  const begin = useContext(DragContext)
+
+  function grabColumn(column: PlacedColumn, point: Vector3) {
+    const room = roomOf(point, project.wall.width, project.room.depth)
+    const along = alongOf(column.wallId, room, project.room.islandX)
+    begin({ kind: 'column', id: column.id, wallId: column.wallId, grab: along - column.x, origin: column.x })
+  }
+
+  function grabIsland(point: Vector3) {
+    const room = roomOf(point, project.wall.width, project.room.depth)
+    begin({
+      kind: 'island',
+      grabX: room.x - project.room.islandX,
+      grabZ: room.z - project.room.islandZ,
+      originX: project.room.islandX,
+      originZ: project.room.islandZ,
+    })
+  }
 
   return (
     <group>
       {placed.map((column) => (
-        <Column
-          key={column.id}
-          project={project}
-          column={column}
-          door={finish.color}
-          carcass={finish.carcass}
-          selected={column.id === selectedId}
-          mark={marks.get(column.id) ?? null}
-          onSelect={onSelect}
-        />
+        <Mount key={column.id} project={project} wallId={column.wallId} along={column.x} size={column.width}>
+          <Column
+            project={project}
+            column={{ ...column, x: 0 }}
+            door={finish.color}
+            carcass={finish.carcass}
+            selected={column.id === selectedId}
+            mark={marks.get(column.id) ?? null}
+            onSelect={onSelect}
+            onGrab={(point) => grabColumn(column, point)}
+          />
+        </Mount>
       ))}
-      {runs.map((run) => (
-        <group key={`${run.x}-${run.width}`}>
-          <Box x={run.x} y={top - project.wall.worktopThickness} z={0} width={run.width} height={project.wall.worktopThickness} depth={project.wall.baseDepth + project.rules.worktopOverhangMm} color={stone} />
-          {project.wall.backsplashHeight > 0 && (
-            <Box x={run.x} y={top} z={0} width={run.width} height={project.wall.backsplashHeight} depth={Math.max(12, project.rules.backsplashMm)} color="#f7f5f1" />
-          )}
-        </group>
-      ))}
+      {runs.map((run) => {
+        const depth = run.wallId === 'ilot' ? project.room.islandDepth : project.wall.baseDepth + project.rules.worktopOverhangMm
+        return (
+          <Mount key={`${run.wallId}-${run.x}`} project={project} wallId={run.wallId} along={run.x} size={run.width}>
+            <Box
+              x={0}
+              y={top - project.wall.worktopThickness}
+              z={0}
+              width={run.width}
+              height={project.wall.worktopThickness}
+              depth={depth}
+              color={stone}
+              onGrab={run.wallId === 'ilot' ? grabIsland : undefined}
+            />
+            {run.wallId !== 'ilot' && project.wall.backsplashHeight > 0 && (
+              <Box x={0} y={top} z={0} width={run.width} height={project.wall.backsplashHeight} depth={Math.max(12, project.rules.backsplashMm)} color="#f7f5f1" />
+            )}
+          </Mount>
+        )
+      })}
     </group>
   )
 }
@@ -192,6 +565,7 @@ function Column({
   selected,
   mark,
   onSelect,
+  onGrab,
 }: {
   project: KitchenProject
   column: PlacedColumn
@@ -200,17 +574,20 @@ function Column({
   selected: boolean
   mark: 'refus' | 'attention' | null
   onSelect: (id: string) => void
+  onGrab: (point: Vector3) => void
 }) {
   const { wall, rules } = project
+  const boxDepth = column.wallId === 'ilot' ? project.room.islandDepth : wall.baseDepth
   const pick = () => onSelect(column.id)
+  const grab = (point: Vector3) => onGrab(point)
   if (column.kind === 'colonne') {
     const height = wall.ceilingHeight - rules.towerGapMm
     return (
       <group>
-        <Box x={column.x} y={0} z={0} width={column.width} height={height} depth={wall.baseDepth} color={carcass} selected={selected} mark={mark} onClick={pick} />
+        <Box x={column.x} y={0} z={0} width={column.width} height={height} depth={boxDepth} color={carcass} selected={selected} mark={mark} onClick={pick} onGrab={grab} />
         {column.tower === 'frigo'
-          ? <Fridge x={column.x} y={wall.plinthHeight} z={wall.baseDepth} width={column.width} height={height - wall.plinthHeight} door={door} />
-          : <Front x={column.x} y={wall.plinthHeight} z={wall.baseDepth} width={column.width} height={height - wall.plinthHeight} color={door} handle={column.handle} dark={project.finish === 'noir'} />}
+          ? <Fridge x={column.x} y={wall.plinthHeight} z={boxDepth} width={column.width} height={height - wall.plinthHeight} door={door} onGrab={grab} />
+          : <Front x={column.x} y={wall.plinthHeight} z={boxDepth} width={column.width} height={height - wall.plinthHeight} color={door} handle={column.handle} dark={project.finish === 'noir'} onGrab={grab} />}
       </group>
     )
   }
@@ -219,16 +596,16 @@ function Column({
   return (
     <group>
       {wall.plinthHeight > 0 && (
-        <Box x={column.x + 18} y={0} z={18} width={column.width - 36} height={wall.plinthHeight - 4} depth={wall.baseDepth - 70} color="#2a2a28" />
+        <Box x={column.x + 18} y={0} z={18} width={column.width - 36} height={wall.plinthHeight - 4} depth={boxDepth - 70} color="#2a2a28" />
       )}
-      <Box x={column.x} y={wall.plinthHeight} z={0} width={column.width} height={wall.baseHeight} depth={wall.baseDepth} color={carcass} selected={selected} mark={mark} onClick={pick} />
-      <BaseFront project={project} column={column} door={door} />
+      <Box x={column.x} y={wall.plinthHeight} z={0} width={column.width} height={wall.baseHeight} depth={boxDepth} color={carcass} selected={selected} mark={mark} onClick={pick} onGrab={grab} />
+      <BaseFront project={project} column={column} door={door} onGrab={grab} />
       {upper && column.upper === 'hotte' && (
         <Hood x={upper.x} y={upper.bottom} z={0} width={upper.width} depth={wall.upperDepth + 40} />
       )}
       {upper && column.upper !== 'hotte' && (
         <group>
-          <Box x={upper.x} y={upper.bottom} z={0} width={upper.width} height={upper.top - upper.bottom} depth={wall.upperDepth} color={carcass} selected={selected} mark={mark} onClick={pick} />
+          <Box x={upper.x} y={upper.bottom} z={0} width={upper.width} height={upper.top - upper.bottom} depth={wall.upperDepth} color={carcass} selected={selected} mark={mark} onClick={pick} onGrab={grab} />
           <Front
             x={upper.x}
             y={upper.bottom}
@@ -239,23 +616,24 @@ function Column({
             handle={column.handle}
             dark={project.finish === 'noir'}
             glass={column.upper === 'micro-ondes'}
+            onGrab={grab}
           />
         </group>
       )}
       {(column.base === 'plaque' || column.base === 'four-plaque') && (
-        <Hob x={column.x} y={worktopTop(wall) + 3} z={wall.baseDepth * 0.22} width={column.width} />
+        <Hob x={column.x} y={worktopTop(wall) + 3} z={boxDepth * 0.22} width={column.width} />
       )}
       {column.base === 'evier' && (
-        <Sink x={column.x} y={worktopTop(wall) - 6} z={wall.baseDepth * 0.28} width={column.width} />
+        <Sink x={column.x} y={worktopTop(wall) - 6} z={boxDepth * 0.28} width={column.width} />
       )}
     </group>
   )
 }
 
-function BaseFront({ project, column, door }: { project: KitchenProject; column: PlacedColumn; door: string }) {
+function BaseFront({ project, column, door, onGrab }: { project: KitchenProject; column: PlacedColumn; door: string; onGrab?: (point: Vector3) => void }) {
   const { wall } = project
   const y = wall.plinthHeight
-  const z = wall.baseDepth
+  const z = column.wallId === 'ilot' ? project.room.islandDepth : wall.baseDepth
   const dark = project.finish === 'noir'
   if (column.base === 'tiroirs') {
     const gap = 8
@@ -263,7 +641,7 @@ function BaseFront({ project, column, door }: { project: KitchenProject; column:
     return (
       <group>
         {[0, 1, 2].map((index) => (
-          <Front key={index} x={column.x} y={y + index * (height + gap)} z={z} width={column.width} height={height} color={door} handle={column.handle} dark={dark} />
+          <Front key={index} x={column.x} y={y + index * (height + gap)} z={z} width={column.width} height={height} color={door} handle={column.handle} dark={dark} onGrab={onGrab} />
         ))}
       </group>
     )
@@ -274,11 +652,11 @@ function BaseFront({ project, column, door }: { project: KitchenProject; column:
   if (column.base === 'lave-vaisselle') {
     return <Washer x={column.x} y={y} z={z} width={column.width} height={wall.baseHeight} />
   }
-  return <Front x={column.x} y={y} z={z} width={column.width} height={wall.baseHeight} color={door} handle={column.handle} dark={dark} />
+  return <Front x={column.x} y={y} z={z} width={column.width} height={wall.baseHeight} color={door} handle={column.handle} dark={dark} onGrab={onGrab} />
 }
 
 function Front({
-  x, y, z, width, height, color, handle, dark, glass = false,
+  x, y, z, width, height, color, handle, dark, glass = false, onGrab,
 }: {
   x: number
   y: number
@@ -289,11 +667,18 @@ function Front({
   handle: HandleId
   dark: boolean
   glass?: boolean
+  onGrab?: (point: Vector3) => void
 }) {
   const inset = 3
   return (
     <group>
-      <mesh position={[x + width / 2, y + height / 2, z + 10]}>
+      <mesh
+        position={[x + width / 2, y + height / 2, z + 10]}
+        onPointerDown={(event) => {
+          event.stopPropagation()
+          onGrab?.(event.point)
+        }}
+      >
         <boxGeometry args={[Math.max(8, width - inset * 2), Math.max(8, height - inset * 2), 18]} />
         <meshStandardMaterial color={color} roughness={0.62} />
       </mesh>
@@ -347,12 +732,44 @@ function Washer({ x, y, z, width, height }: { x: number; y: number; z: number; w
   )
 }
 
-function Fridge({ x, y, z, width, height, door }: { x: number; y: number; z: number; width: number; height: number; door: string }) {
-  const split = height * 0.62
+function Fridge({ x, y, z, width, height, door, onGrab }: { x: number; y: number; z: number; width: number; height: number; door: string; onGrab?: (point: Vector3) => void }) {
+  const split = height * 0.36
+  const body = '#e6e7e4'
+  const grip = door === '#1c1c1c' ? '#d5d5d2' : '#3c3c3a'
+  function down(event: { stopPropagation: () => void; point: Vector3 }) {
+    event.stopPropagation()
+    onGrab?.(event.point)
+  }
   return (
     <group>
-      <Front x={x} y={y + split} z={z} width={width} height={height - split} color={door} handle="barre" dark={false} />
-      <Front x={x} y={y} z={z} width={width} height={split - 6} color={door} handle="barre" dark={false} />
+      <mesh position={[x + width / 2, y + height / 2, z + 8]} onPointerDown={down}>
+        <boxGeometry args={[width - 10, height - 8, 24]} />
+        <meshStandardMaterial color={body} metalness={0.35} roughness={0.32} />
+      </mesh>
+      <mesh position={[x + width / 2, y + height - split / 2 - 6, z + 22]} onPointerDown={down}>
+        <boxGeometry args={[width - 28, split - 16, 8]} />
+        <meshStandardMaterial color={door} roughness={0.4} metalness={0.08} />
+      </mesh>
+      <mesh position={[x + width / 2, y + (height - split) / 2, z + 22]} onPointerDown={down}>
+        <boxGeometry args={[width - 28, height - split - 28, 8]} />
+        <meshStandardMaterial color={door} roughness={0.4} metalness={0.08} />
+      </mesh>
+      <mesh position={[x + width - 42, y + height - split / 2 - 6, z + 36]}>
+        <boxGeometry args={[14, split * 0.55, 16]} />
+        <meshStandardMaterial color={grip} metalness={0.72} roughness={0.22} />
+      </mesh>
+      <mesh position={[x + width - 42, y + (height - split) * 0.55, z + 36]}>
+        <boxGeometry args={[14, Math.min(280, (height - split) * 0.35), 16]} />
+        <meshStandardMaterial color={grip} metalness={0.72} roughness={0.22} />
+      </mesh>
+      <mesh position={[x + width / 2, y + 18, z + 24]}>
+        <boxGeometry args={[width * 0.72, 16, 6]} />
+        <meshStandardMaterial color="#2a2a28" metalness={0.4} roughness={0.45} />
+      </mesh>
+      <mesh position={[x + 16, y + height / 2, z + 28]}>
+        <boxGeometry args={[4, height - 36, 2]} />
+        <meshStandardMaterial color="#b7b8b4" />
+      </mesh>
     </group>
   )
 }
@@ -428,7 +845,7 @@ function HandleMark({ x, y, z, width, handle, dark }: { x: number; y: number; z:
 }
 
 function Box({
-  x, y, z, width, height, depth, color, onClick, selected = false, mark = null,
+  x, y, z, width, height, depth, color, onClick, onGrab, selected = false, mark = null,
 }: {
   x: number
   y: number
@@ -438,6 +855,7 @@ function Box({
   depth: number
   color: string
   onClick?: () => void
+  onGrab?: (point: Vector3) => void
   selected?: boolean
   mark?: 'refus' | 'attention' | null
 }) {
@@ -447,6 +865,11 @@ function Box({
       onClick={(event) => {
         event.stopPropagation()
         onClick?.()
+      }}
+      onPointerDown={(event) => {
+        if (!onGrab) return
+        event.stopPropagation()
+        onGrab(event.point)
       }}
     >
       <boxGeometry args={[width, height, depth]} />

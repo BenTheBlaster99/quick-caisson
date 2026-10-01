@@ -26,7 +26,7 @@ export function buildKitchenCutList(project: KitchenProject): CutRow[] {
     issues.filter((issue) => issue.level === 'refus' && issue.part === 'haut').map((issue) => issue.columnId).filter((id): id is string => id !== null),
   )
   const carcass = project.rules.carcassMm
-  const runs = worktopRuns(project.columns)
+  const runs = worktopRuns(project.columns.filter((column) => column.wallId !== 'ilot' || project.room.island))
 
   placed.forEach((column, index) => {
     if (blocked.has(column.id)) return
@@ -75,12 +75,12 @@ export function buildKitchenCutList(project: KitchenProject): CutRow[] {
       role: 'plan de travail',
       roleOrder: ROLE.plan,
       quantity: 1,
-      ...longSide(run.width, project.wall.baseDepth + project.rules.worktopOverhangMm),
+      ...longSide(run.width, run.wallId === 'ilot' ? project.room.islandDepth : project.wall.baseDepth + project.rules.worktopOverhangMm),
       thickness: project.wall.worktopThickness,
       material: 'plan',
       edges: 'avant',
     })
-    if (project.wall.backsplashHeight > 0) {
+    if (run.wallId !== 'ilot' && project.wall.backsplashHeight > 0) {
       push(rows, {
         caisson: 'plan',
         caissonIndex: 2000 + index,

@@ -1,17 +1,18 @@
 import { Component, Fragment, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { formatCutCell } from '../../domain/cutlist'
 import { buildKitchenCutList } from '../../kitchen/cutlist'
-import { KITCHEN_FINISHES, kitchenFinish } from '../../kitchen/finishes'
+import { KITCHEN_FINISHES, kitchenFinish, WALL_FINISHES, wallFinish } from '../../kitchen/finishes'
 import { canCorrectIssue, COLUMN_MAX, COLUMN_MIN, shortBase, upperLabel } from '../../kitchen/layout'
 import { kitchenWallLimits } from '../../kitchen/project'
-import type { BaseRole, HandleId, KitchenIssue, OpeningKind, UpperRole } from '../../kitchen/types'
+import { WALLS, wallName } from '../../kitchen/room'
+import type { BaseRole, HandleId, KitchenIssue, KitchenShape, OpeningKind, UpperRole, WallFinishId, WallId } from '../../kitchen/types'
 import { useKitchen } from '../../state/kitchen-context'
 import { MmField } from '../MmField'
 import { KitchenPlan } from './KitchenPlan'
 import { KitchenScene, type KitchenCamera } from './KitchenScene'
 
 const STEPS = [
-  { id: 'cuisine', label: 'Le mur' },
+  { id: 'cuisine', label: 'La pièce' },
   { id: 'cuisine/ouvertures', label: 'Ouvertures' },
   { id: 'cuisine/implantation', label: 'Implantation' },
   { id: 'cuisine/plan', label: 'Plan' },
@@ -45,9 +46,17 @@ const HANDLES: { id: HandleId; label: string }[] = [
   { id: 'barre', label: 'Barre' },
 ]
 
+const SHAPES: { id: KitchenShape; label: string }[] = [
+  { id: 'lineaire', label: 'Linéaire' },
+  { id: 'l', label: 'L' },
+  { id: 'u', label: 'U' },
+]
+
 const CAMERAS: { id: KitchenCamera; label: string }[] = [
   { id: 'perspective', label: '3/4' },
-  { id: 'face', label: 'Face' },
+  { id: 'fond', label: 'Fond' },
+  { id: 'gauche', label: 'Gauche' },
+  { id: 'droit', label: 'Droit' },
   { id: 'top', label: 'Dessus' },
 ]
 
@@ -64,9 +73,17 @@ export function KitchenApp() {
   const [frameToken, setFrameToken] = useState(0)
   const [cameraMode, setCameraMode] = useState<KitchenCamera>('perspective')
   const [band, setBand] = useState<'haut' | 'bas'>('bas')
+  const [activeWall, setActiveWall] = useState<WallId>('A')
   const input = useRef<HTMLInputElement>(null)
   const current = STEPS[step]
-  const sum = kitchen.project.columns.reduce((total, column) => total + column.width, 0)
+  const shapeName = SHAPES.find((item) => item.id === kitchen.project.room.shape)?.label ?? 'Linéaire'
+
+  function choose(id: string) {
+    kitchen.select(id)
+    const column = kitchen.project.columns.find((item) => item.id === id)
+    if (column) setActiveWall(column.wallId)
+    setBand('bas')
+  }
 
   function go(index: number) {
     const next = Math.min(STEPS.length - 1, Math.max(0, index))
@@ -107,7 +124,7 @@ export function KitchenApp() {
           />
         </div>
         <p className={kitchen.notice ? 'status error' : 'status'} role="status">
-          {kitchen.notice ?? `${kitchen.project.wall.width} × ${kitchen.project.wall.ceilingHeight} mm · ${kitchen.project.columns.length} meubles`}
+          {kitchen.notice ?? `${kitchen.project.wall.width} × ${kitchen.project.room.depth} mm · ${shapeName} · ${kitchen.project.columns.length} meubles`}
         </p>
         <div className="toolbar-actions">
           <button type="button" className="secondary" onClick={kitchen.undo} disabled={!kitchen.canUndo}>Annuler</button>
@@ -126,13 +143,13 @@ export function KitchenApp() {
           </button>
         ))}
       </nav>
-      <CheckStrip sum={sum} width={kitchen.project.wall.width} issues={kitchen.issues} onSee={see} />
+      <CheckStrip width={kitchen.project.wall.width} depth={kitchen.project.room.depth} issues={kitchen.issues} onSee={see} />
       {drawing ? (
         <main className="stage kitchen-draw">
           <KitchenPlan
             project={kitchen.project}
             selectedId={kitchen.selected.id}
-            onSelect={(id) => { kitchen.select(id); setBand('bas') }}
+            onSelect={choose}
             focus={current.id === 'cuisine/elevation' ? 'elevation' : 'plan'}
           />
         </main>
@@ -142,7 +159,7 @@ export function KitchenApp() {
             <ViewportBar cameraMode={cameraMode} onCamera={setCameraMode} hint="La liste, le plan et l'élévation lisent le même fichier." />
             <div className="viewport-3d">
               <ViewBoundary>
-                <KitchenScene project={kitchen.project} selectedId={kitchen.selected.id} frameToken={frameToken} cameraMode={cameraMode} onSelect={(id) => { kitchen.select(id); setBand('bas') }} />
+                <KitchenScene project={kitchen.project} selectedId={kitchen.selected.id} frameToken={frameToken} cameraMode={cameraMode} onSelect={choose} onMoveColumn={kitchen.placeColumn} onMoveOpening={kitchen.placeOpening} onMoveIsland={kitchen.placeIsland} />
               </ViewBoundary>
             </div>
           </section>
@@ -153,17 +170,17 @@ export function KitchenApp() {
           <div className="stage-side">
             {current.id === 'cuisine' && <WallFields />}
             {current.id === 'cuisine/ouvertures' && <OpeningFields />}
-            {current.id === 'cuisine/implantation' && <ColumnFields band={band} onBand={setBand} />}
+            {current.id === 'cuisine/implantation' && <ColumnFields band={band} onBand={setBand} wallId={activeWall} onWall={setActiveWall} />}
           </div>
           <section className="stage-main" aria-label="Vue 3D">
             <ViewportBar
               cameraMode={cameraMode}
               onCamera={setCameraMode}
-              hint={current.id === 'cuisine' ? 'Le mur, le plan et la crédence.' : current.id === 'cuisine/ouvertures' ? 'Fenêtre, porte, ou zone interdite.' : 'Haut en haut, bas en bas. On ne règle qu’un des deux.'}
+              hint={current.id === 'cuisine' ? 'Largeur et profondeur de toute la pièce. Glissez un meuble, une porte, une fenêtre, ou le plan de l’îlot.' : current.id === 'cuisine/ouvertures' ? 'Glissez la fenêtre pour sa hauteur. La porte reste au sol.' : 'Choisissez le mur, puis glissez le meuble le long de ce mur.'}
             />
             <div className="viewport-3d">
               <ViewBoundary>
-                <KitchenScene project={kitchen.project} selectedId={kitchen.selected.id} frameToken={frameToken} cameraMode={cameraMode} onSelect={(id) => { kitchen.select(id); setBand('bas') }} />
+                <KitchenScene project={kitchen.project} selectedId={kitchen.selected.id} frameToken={frameToken} cameraMode={cameraMode} onSelect={choose} onMoveColumn={kitchen.placeColumn} onMoveOpening={kitchen.placeOpening} onMoveIsland={kitchen.placeIsland} />
               </ViewBoundary>
             </div>
           </section>
@@ -186,14 +203,14 @@ function ViewportBar({ cameraMode, onCamera, hint }: { cameraMode: KitchenCamera
   )
 }
 
-function CheckStrip({ sum, width, issues, onSee }: { sum: number; width: number; issues: KitchenIssue[]; onSee: (id: string | null, part?: 'haut' | 'bas') => void }) {
+function CheckStrip({ width, depth, issues, onSee }: { width: number; depth: number; issues: KitchenIssue[]; onSee: (id: string | null, part?: 'haut' | 'bas') => void }) {
   const refus = issues.filter((issue) => issue.level === 'refus').length
   const attention = issues.length - refus
   const first = issues[0]
   const label = [refus > 0 ? `${refus} refus` : '', attention > 0 ? `${attention} attention` : ''].filter(Boolean).join(' · ')
   return (
     <div className="kitchen-check" role="status">
-      <span className={sum === width ? 'ok' : 'bad'}>{sum} / {width}</span>
+      <span className="ok">{width} × {depth} mm</span>
       {issues.length === 0 ? (
         <span className="ok">Rien à signaler</span>
       ) : (
@@ -206,17 +223,28 @@ function CheckStrip({ sum, width, issues, onSee }: { sum: number; width: number;
 }
 
 function WallFields() {
-  const { project, setWall, setFinish } = useKitchen()
+  const { project, setWall, setDepth, setShape, setIsland, setFinish, setWallFinish } = useKitchen()
   const limits = kitchenWallLimits()
   const fields = Object.keys(limits) as (keyof typeof limits)[]
+  const [paintWall, setPaintWall] = useState<'A' | 'B' | 'C' | 'D'>('A')
+  const walls = WALLS.filter((id): id is 'A' | 'B' | 'C' | 'D' => id !== 'ilot')
   return (
     <section className="panel">
-      <h2>Le mur</h2>
+      <h2>La pièce</h2>
+      <div className="segment" role="group" aria-label="Forme">
+        {SHAPES.map((item) => (
+          <button key={item.id} type="button" aria-pressed={project.room.shape === item.id} onClick={() => setShape(item.id)}>{item.label}</button>
+        ))}
+      </div>
+      <p className="summary">Linéaire : le mur du fond. L : fond et gauche. U : fond, gauche et droit. Le mur avant n’apparaît que s’il porte une porte ou une fenêtre.</p>
+      <div className="row-actions">
+        <button type="button" className="secondary" aria-pressed={project.room.island} onClick={() => setIsland(!project.room.island)}>{project.room.island ? 'Îlot posé' : 'Ajouter un îlot'}</button>
+      </div>
       <div className="fields">
         {fields.map((field) => (
           <MmField
             key={field}
-            label={limits[field].label}
+            label={field === 'width' ? 'Largeur (murs A et D)' : limits[field].label}
             value={project.wall[field]}
             min={limits[field].min}
             max={limits[field].max}
@@ -224,7 +252,26 @@ function WallFields() {
             onCommit={(value) => setWall(field, value)}
           />
         ))}
+        <MmField label="Profondeur (murs B et C)" value={project.room.depth} min={1800} max={6000} hint="1800–6000 mm" onCommit={setDepth} />
       </div>
+      <p className="summary">Murs</p>
+      <div className="segment" role="group" aria-label="Mur à peindre">
+        {walls.map((id) => (
+          <button key={id} type="button" aria-pressed={paintWall === id} onClick={() => setPaintWall(id)}>
+            <i className="dot" style={{ background: wallFinish(project.room.finishes[id]).color }} />
+            {id === 'A' ? 'Fond' : id === 'B' ? 'Gauche' : id === 'C' ? 'Droit' : 'Avant'}
+          </button>
+        ))}
+      </div>
+      <div className="swatches" role="group" aria-label={`Matière de ${wallName(paintWall)}`}>
+        {WALL_FINISHES.map((finish) => (
+          <button key={finish.id} type="button" className="swatch" aria-pressed={project.room.finishes[paintWall] === finish.id} onClick={() => setWallFinish(paintWall, finish.id as WallFinishId)}>
+            <i style={{ background: finish.color }} />
+            {finish.name}
+          </button>
+        ))}
+      </div>
+      <p className="summary">Meubles</p>
       <div className="swatches" role="group" aria-label="Finition">
         {KITCHEN_FINISHES.map((finish) => (
           <button key={finish.id} type="button" className="swatch" aria-pressed={project.finish === finish.id} onClick={() => setFinish(finish.id)}>
@@ -233,27 +280,34 @@ function WallFields() {
           </button>
         ))}
       </div>
-      <p className="summary">Plan {project.wall.worktopThickness} mm, débord {project.rules.worktopOverhangMm} mm. Crédence {project.wall.backsplashHeight} mm. Finition {kitchenFinish(project.finish).name}.</p>
+      <p className="summary">Plan {project.wall.worktopThickness} mm, débord {project.rules.worktopOverhangMm} mm. Crédence {project.wall.backsplashHeight} mm. Meubles {kitchenFinish(project.finish).name}. {wallName(paintWall)} {wallFinish(project.room.finishes[paintWall]).name}.</p>
     </section>
   )
 }
 
 function OpeningFields() {
   const { project, addZone, setZone, removeZone } = useKitchen()
+  const [wallId, setWallId] = useState<WallId>('A')
+  const walls = WALLS.filter((id) => id !== 'ilot')
   return (
     <section className="panel">
       <h2>Ouvertures</h2>
-      <p className="lead">Une fenêtre peut passer au-dessus des bas. Une porte ou une zone interdite ne peut pas.</p>
+      <p className="lead">Une fenêtre peut passer au-dessus des bas. Une porte ou une zone interdite ne peut pas. Glissez-les dans la vue.</p>
+      <div className="segment" role="group" aria-label="Mur">
+        {walls.map((id) => (
+          <button key={id} type="button" aria-pressed={wallId === id} onClick={() => setWallId(id)}>{wallName(id)}</button>
+        ))}
+      </div>
       <div className="row-actions">
-        <button type="button" className="secondary" onClick={() => addZone('fenetre')}>Fenêtre</button>
-        <button type="button" className="secondary" onClick={() => addZone('porte')}>Porte</button>
-        <button type="button" className="secondary" onClick={() => addZone('interdit')}>Zone interdite</button>
+        <button type="button" className="secondary" onClick={() => addZone('fenetre', wallId)}>Fenêtre</button>
+        <button type="button" className="secondary" onClick={() => addZone('porte', wallId)}>Porte</button>
+        <button type="button" className="secondary" onClick={() => addZone('interdit', wallId)}>Zone interdite</button>
       </div>
       {project.openings.length === 0 && <p className="summary">Aucune ouverture. Le mur est libre sur toute sa largeur.</p>}
       {project.openings.map((opening) => (
         <article key={opening.id} className="rule-card">
           <header>
-            <strong>{labelKind(opening.kind)}</strong>
+            <strong>{labelKind(opening.kind)} · {wallName(opening.wallId)}</strong>
             <button type="button" className="secondary" onClick={() => removeZone(opening.id)}>Retirer</button>
           </header>
           <MmField label="Position" value={opening.x} hint="Depuis la gauche" onCommit={(value) => setZone(opening.id, { x: value })} />
@@ -266,14 +320,18 @@ function OpeningFields() {
   )
 }
 
-function ColumnFields({ band, onBand }: { band: 'haut' | 'bas'; onBand: (band: 'haut' | 'bas') => void }) {
+function ColumnFields({ band, onBand, wallId, onWall }: { band: 'haut' | 'bas'; onBand: (band: 'haut' | 'bas') => void; wallId: WallId; onWall: (wallId: WallId) => void }) {
   const kitchen = useKitchen()
   const { project, selected } = kitchen
-  const index = project.columns.findIndex((column) => column.id === selected.id)
-  const columns = project.columns.map((column) => `${column.width}fr`).join(' ')
-  const editingHaut = selected.kind === 'bas' && band === 'haut'
+  const walls = WALLS.filter((id) => id !== 'ilot' || project.room.island)
+  const shownWall = walls.includes(wallId) ? wallId : 'A'
+  const onThisWall = project.columns.filter((column) => column.wallId === shownWall)
+  const index = onThisWall.findIndex((column) => column.id === selected.id)
+  const columns = onThisWall.map((column) => `${column.width}fr`).join(' ')
+  const onWallSelected = selected.wallId === shownWall
+  const editingHaut = onWallSelected && selected.kind === 'bas' && band === 'haut'
   const pieceIssues = kitchen.issues.filter((issue) => {
-    if (issue.columnId !== selected.id) return false
+    if (issue.columnId !== selected.id || !onWallSelected) return false
     if (selected.kind === 'colonne') return true
     return editingHaut ? issue.part === 'haut' : issue.part !== 'haut'
   })
@@ -281,8 +339,16 @@ function ColumnFields({ band, onBand }: { band: 'haut' | 'bas'; onBand: (band: '
   return (
     <section className="panel">
       <h2>Implantation</h2>
+      <div className="segment" role="group" aria-label="Mur en cours">
+        {walls.map((id) => (
+          <button key={id} type="button" aria-pressed={shownWall === id} onClick={() => onWall(id)}>{id === 'ilot' ? 'Îlot' : wallName(id)}</button>
+        ))}
+      </div>
+      {onThisWall.length === 0 ? (
+        <p className="summary">{wallName(shownWall)} est vide.</p>
+      ) : (
       <div className="runs" style={{ gridTemplateColumns: columns }}>
-        {project.columns.map((column, cursor) => {
+        {onThisWall.map((column, cursor) => {
           const number = String(cursor + 1).padStart(2, '0')
           const place = cursor + 1
           if (column.kind === 'colonne') {
@@ -329,12 +395,13 @@ function ColumnFields({ band, onBand }: { band: 'haut' | 'bas'; onBand: (band: '
           )
         })}
       </div>
+      )}
       <div className="row-actions">
-        <button type="button" className="secondary" aria-pressed={selected.locked} onClick={() => kitchen.setLocked(!selected.locked)}>{selected.locked ? 'Déverrouiller' : 'Verrouiller'}</button>
-        <button type="button" className="secondary" onClick={kitchen.add}>Ajouter</button>
-        <button type="button" className="secondary" onClick={kitchen.remove} disabled={project.columns.length === 1}>Retirer</button>
+        <button type="button" className="secondary" aria-pressed={selected.locked} disabled={!onWallSelected} onClick={() => kitchen.setLocked(!selected.locked)}>{selected.locked ? 'Déverrouiller' : 'Verrouiller'}</button>
+        <button type="button" className="secondary" onClick={() => kitchen.add(shownWall)}>Ajouter</button>
+        <button type="button" className="secondary" onClick={kitchen.remove} disabled={!onWallSelected || project.columns.length === 1}>Retirer</button>
       </div>
-      {editingHaut ? (
+      {onWallSelected && (editingHaut ? (
         <div className="piece">
           <h3>Haut · meuble {index + 1}</h3>
           <div className="choices" role="group" aria-label="Meuble haut">
@@ -378,7 +445,7 @@ function ColumnFields({ band, onBand }: { band: 'haut' | 'bas'; onBand: (band: '
             <p className="summary">{applianceNote(selected.base, selected.width, project.wall.baseHeight, project.wall.baseDepth, project.rules)}</p>
           )}
         </div>
-      )}
+      ))}
       <Problems issues={pieceIssues} onCorrect={kitchen.correct} />
     </section>
   )

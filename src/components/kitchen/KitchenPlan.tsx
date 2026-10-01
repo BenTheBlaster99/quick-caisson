@@ -1,5 +1,6 @@
 import { inspectKitchen, openingName, placeColumns, shortBase, upperSpan, worktopRuns, worktopTop } from '../../kitchen/layout'
-import { kitchenFinish } from '../../kitchen/finishes'
+import { kitchenFinish, wallFinish } from '../../kitchen/finishes'
+import { footprint, wallName, builtWalls } from '../../kitchen/room'
 import type { KitchenProject } from '../../kitchen/types'
 
 export function KitchenPlan({
@@ -27,7 +28,7 @@ function Elevation({ project, selectedId, onSelect }: { project: KitchenProject;
   const scale = 0.22
   const width = wall.width * scale + pad * 2
   const height = wall.ceilingHeight * scale + pad * 2
-  const placed = placeColumns(project.columns)
+  const placed = placeColumns(project.columns.filter((column) => column.wallId === 'A'))
   const top = worktopTop(wall)
   const refused = new Set(inspectKitchen(project).issues.filter((issue) => issue.level === 'refus').map((issue) => issue.columnId))
   const wash = kitchenFinish(project.finish).color
@@ -38,10 +39,10 @@ function Elevation({ project, selectedId, onSelect }: { project: KitchenProject;
 
   return (
     <figure>
-      <figcaption>Élévation · {wall.width} × {wall.ceilingHeight} mm</figcaption>
+      <figcaption>Élévation · {wallName('A')} · {wall.width} × {wall.ceilingHeight} mm</figcaption>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Élévation de la cuisine">
         <rect x={pad} y={pad} width={wall.width * scale} height={wall.ceilingHeight * scale} fill="#efeae2" stroke="#1c1c1c" />
-        {project.openings.map((opening) => (
+        {project.openings.filter((opening) => opening.wallId === 'A').map((opening) => (
           <rect
             key={opening.id}
             x={pad + opening.x * scale}
@@ -74,8 +75,8 @@ function Elevation({ project, selectedId, onSelect }: { project: KitchenProject;
             </g>
           )
         })}
-        {worktopRuns(project.columns).map((run) => (
-          <rect key={run.x} x={pad + run.x * scale} y={y(top)} width={run.width * scale} height={Math.max(2, wall.worktopThickness * scale)} fill="#c8bba8" />
+        {worktopRuns(project.columns).filter((run) => run.wallId === 'A').map((run) => (
+          <rect key={`${run.wallId}-${run.x}`} x={pad + run.x * scale} y={y(top)} width={run.width * scale} height={Math.max(2, wall.worktopThickness * scale)} fill="#c8bba8" />
         ))}
         <text x={pad} y={height - 18} fontSize="12">{wall.width} mm</text>
       </svg>
@@ -84,48 +85,63 @@ function Elevation({ project, selectedId, onSelect }: { project: KitchenProject;
 }
 
 function TopPlan({ project, selectedId, onSelect }: { project: KitchenProject; selectedId: string; onSelect: (id: string) => void }) {
-  const { wall } = project
+  const { wall, room } = project
   const pad = 48
-  const scale = 0.22
-  const depth = wall.baseDepth + project.rules.worktopOverhangMm
+  const scale = 0.16
   const width = wall.width * scale + pad * 2
-  const height = depth * scale + pad * 2 + 36
-  const placed = placeColumns(project.columns)
+  const height = room.depth * scale + pad * 2
+  const placed = placeColumns(project.columns.filter((column) => column.wallId !== 'ilot' || room.island))
   const wash = kitchenFinish(project.finish).color
 
   return (
     <figure>
-      <figcaption>Plan · profondeur bas {wall.baseDepth} mm, débord {project.rules.worktopOverhangMm} mm</figcaption>
+      <figcaption>Plan · {wall.width} × {room.depth} mm</figcaption>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Plan de la cuisine">
-        <rect x={pad} y={pad} width={wall.width * scale} height={8} fill="#1c1c1c" />
-        {project.openings.filter((opening) => opening.kind !== 'interdit').map((opening) => (
-          <rect key={opening.id} x={pad + opening.x * scale} y={pad - 6} width={opening.width * scale} height={18} fill={opening.kind === 'fenetre' ? '#d5e6f2' : '#f7f3ec'} stroke="#1c1c1c" />
-        ))}
+        <rect x={pad} y={pad} width={wall.width * scale} height={room.depth * scale} fill="#f6f3ee" stroke="#1c1c1c" />
+        {builtWalls(room.shape, project.openings).includes('A') && <rect x={pad} y={pad} width={wall.width * scale} height={10} fill={wallFinish(room.finishes.A).color} />}
+        {builtWalls(room.shape, project.openings).includes('D') && <rect x={pad} y={pad + room.depth * scale - 10} width={wall.width * scale} height={10} fill={wallFinish(room.finishes.D).color} />}
+        {builtWalls(room.shape, project.openings).includes('B') && <rect x={pad} y={pad} width={10} height={room.depth * scale} fill={wallFinish(room.finishes.B).color} />}
+        {builtWalls(room.shape, project.openings).includes('C') && <rect x={pad + wall.width * scale - 10} y={pad} width={10} height={room.depth * scale} fill={wallFinish(room.finishes.C).color} />}
+        {project.openings.filter((opening) => opening.wallId !== 'ilot').map((opening) => {
+          const box = footprint(room, wall.width, opening.wallId, opening.x, opening.width, 80)
+          return (
+            <rect
+              key={opening.id}
+              x={pad + box.x * scale}
+              y={pad + box.z * scale}
+              width={Math.max(2, box.w * scale)}
+              height={Math.max(2, box.d * scale)}
+              fill={opening.kind === 'fenetre' ? '#d5e6f2' : opening.kind === 'porte' ? '#f7f3ec' : '#f0c2bc'}
+              stroke="#1c1c1c"
+            />
+          )
+        })}
         {placed.map((column) => {
-          const boxDepth = wall.baseDepth
+          const into = column.wallId === 'ilot' ? room.islandDepth : wall.baseDepth
+          const box = footprint(room, wall.width, column.wallId, column.x, column.width, into)
           return (
             <g key={column.id} onClick={() => onSelect(column.id)} style={{ cursor: 'pointer' }}>
               <rect
-                x={pad + column.x * scale}
-                y={pad + 12}
-                width={column.width * scale}
-                height={boxDepth * scale}
+                x={pad + box.x * scale}
+                y={pad + box.z * scale}
+                width={box.w * scale}
+                height={box.d * scale}
                 fill={column.kind === 'colonne' ? '#d7d3cc' : wash}
                 stroke={column.id === selectedId ? '#1d4a42' : '#1c1c1c'}
                 strokeWidth={column.id === selectedId ? 3 : 1}
               />
-              {column.kind === 'bas' && column.upper !== 'aucun' && (
-                <rect x={pad + column.x * scale + 2} y={pad + 16} width={column.width * scale - 4} height={wall.upperDepth * scale} fill="none" stroke="#1c1c1c" strokeDasharray="4 3" />
-              )}
-              <text x={pad + (column.x + column.width / 2) * scale} y={pad + 12 + boxDepth * scale / 2} textAnchor="middle" fontSize="11">{column.width}</text>
+              <text x={pad + (box.x + box.w / 2) * scale} y={pad + (box.z + box.d / 2) * scale} textAnchor="middle" fontSize="11">{column.width}</text>
             </g>
           )
         })}
-        {project.openings.filter((opening) => opening.kind === 'interdit').map((opening) => (
-          <text key={opening.id} x={pad + (opening.x + opening.width / 2) * scale} y={height - 16} textAnchor="middle" fontSize="11" fill="#8d2f2a">
-            {openingName(opening.kind)}
-          </text>
-        ))}
+        {project.openings.filter((opening) => opening.kind === 'interdit').map((opening) => {
+          const box = footprint(room, wall.width, opening.wallId, opening.x, opening.width, 80)
+          return (
+            <text key={`${opening.id}-label`} x={pad + (box.x + box.w / 2) * scale} y={pad + (box.z + box.d) * scale + 14} textAnchor="middle" fontSize="11" fill="#8d2f2a">
+              {openingName(opening.kind)}
+            </text>
+          )
+        })}
       </svg>
     </figure>
   )

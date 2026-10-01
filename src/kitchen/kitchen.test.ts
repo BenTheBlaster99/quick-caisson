@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { buildKitchenCutList } from './cutlist'
 import { inspectKitchen, setColumnWidth, worktopRuns } from './layout'
-import { defaultKitchen, parseKitchen, serializeKitchen, setKitchenWall, updateOpening } from './project'
+import { defaultKitchen, moveColumn, parseKitchen, serializeKitchen, setKitchenWall, setWallFinish, updateOpening } from './project'
 
-describe('straight kitchen', () => {
-  it('opens on a wall whose modules sum to the width and avoid the window', () => {
+describe('kitchen room', () => {
+  it('opens on an L with a clear wall, a door, and an island', () => {
     const kitchen = defaultKitchen()
-    expect(kitchen.columns.reduce((sum, column) => sum + column.width, 0)).toBe(kitchen.wall.width)
+    expect(kitchen.room.shape).toBe('l')
+    expect(kitchen.room.island).toBe(true)
+    expect(kitchen.wall.width).toBe(3600)
+    expect(kitchen.room.depth).toBe(2800)
     expect(inspectKitchen(kitchen).issues).toEqual([])
-    expect(worktopRuns(kitchen.columns)).toEqual([{ x: 0, width: 3000 }])
+    expect(worktopRuns(kitchen.columns)).toEqual(expect.arrayContaining([{ wallId: 'A', x: 0, width: 3000 }]))
   })
 
   it('refuses an upper cabinet that crosses the window by a measured overlap', () => {
@@ -35,13 +38,31 @@ describe('straight kitchen', () => {
     expect(inspectKitchen(kitchen).issues.some((issue) => /sous le plan/.test(issue.message))).toBe(true)
   })
 
-  it('opens an older anthracite file as noir and keeps a missing name', () => {
-    const raw = JSON.parse(serializeKitchen(defaultKitchen())) as { finish: string; name?: string }
+  it('opens an older straight file on wall A', () => {
+    const raw = JSON.parse(serializeKitchen(defaultKitchen())) as {
+      finish: string
+      name?: string
+      room?: unknown
+      columns: { wallId?: string; x?: number }[]
+      openings: { wallId?: string }[]
+    }
     raw.finish = 'anthracite'
     delete raw.name
+    delete raw.room
+    for (const column of raw.columns) {
+      delete column.wallId
+      delete column.x
+    }
+    for (const opening of raw.openings) delete opening.wallId
     const opened = parseKitchen(JSON.stringify(raw))
     expect(opened.finish).toBe('noir')
     expect(opened.name).toBe('Cuisine')
+    expect(opened.room.shape).toBe('lineaire')
+    expect(opened.room.island).toBe(false)
+    expect(opened.columns.every((column) => column.wallId === 'A')).toBe(true)
+    expect(opened.columns[0].x).toBe(0)
+    expect(opened.columns[1].x).toBe(opened.columns[0].width)
+    expect(opened.room.finishes).toEqual({ A: 'blanc', B: 'blanc', C: 'blanc', D: 'blanc' })
   })
 
   it('refuses a sink narrower than the appliance rule', () => {
@@ -54,15 +75,23 @@ describe('straight kitchen', () => {
     }
   })
 
-  it('keeps a locked fridge still when the wall shrinks', () => {
+  it('leaves a locked fridge in place when the room gets shorter', () => {
     const kitchen = defaultKitchen()
     kitchen.columns[5].locked = true
     const resized = setKitchenWall(kitchen, 'width', 3400)
     expect(resized.ok).toBe(true)
     if (resized.ok) {
       expect(resized.project.columns[5].width).toBe(600)
-      expect(resized.project.columns.reduce((sum, column) => sum + column.width, 0)).toBe(3400)
+      expect(resized.project.columns[5].x).toBe(3000)
+      expect(inspectKitchen(resized.project).issues.some((issue) => issue.columnId === 'k6' && /dépasse/.test(issue.message))).toBe(true)
     }
+  })
+
+  it('slides a module up to its neighbour and no further', () => {
+    const kitchen = defaultKitchen()
+    const moved = moveColumn(kitchen, 'k2', 100)
+    const column = moved.columns.find((item) => item.id === 'k2')
+    expect(column?.x).toBe(600)
   })
 
   it('round-trips the default kitchen', () => {
@@ -76,9 +105,17 @@ describe('straight kitchen', () => {
     expect(moved.ok).toBe(false)
   })
 
+  it('paints one wall without changing the others', () => {
+    const kitchen = defaultKitchen()
+    const next = setWallFinish(kitchen, 'B', 'carrelage')
+    expect(next.room.finishes.B).toBe('carrelage')
+    expect(next.room.finishes.A).toBe('blanc')
+    expect(parseKitchen(serializeKitchen(next)).room.finishes.B).toBe('carrelage')
+  })
+
   it('cuts a worktop that stops at the tall unit', () => {
     const rows = buildKitchenCutList(defaultKitchen())
-    expect(rows.find((row) => row.role === 'plan de travail')).toMatchObject({ length: 3000, thickness: 38 })
-    expect(rows.find((row) => row.role === 'crédence')).toMatchObject({ length: 3000, width: 600 })
+    expect(rows.find((row) => row.role === 'plan de travail' && row.length === 3000)).toMatchObject({ length: 3000, thickness: 38 })
+    expect(rows.find((row) => row.role === 'crédence' && row.length === 3000)).toMatchObject({ length: 3000, width: 600 })
   })
 })

@@ -1,5 +1,5 @@
-import { redistribute, setCaissonWidth, sumWidths } from '../domain/caissons'
 import { MIN_CAISSON, MAX_CAISSON } from '../domain/rules'
+import { cornerInset, slideAlong, wallLength } from './room'
 import type {
   BaseRole,
   KitchenColumn,
@@ -9,6 +9,7 @@ import type {
   KitchenWall,
   Opening,
   UpperRole,
+  WallId,
 } from './types'
 
 export const COLUMN_MIN = MIN_CAISSON
@@ -18,7 +19,7 @@ export type Span = { x: number; width: number; bottom: number; top: number }
 
 export type PlacedColumn = KitchenColumn & { x: number }
 
-export type WorktopRun = { x: number; width: number }
+export type WorktopRun = { wallId: WallId; x: number; width: number }
 
 export function worktopTop(wall: KitchenWall): number {
   return wall.plinthHeight + wall.baseHeight + wall.worktopThickness
@@ -44,29 +45,29 @@ export function overlaps(a: Span, opening: Opening): boolean {
 }
 
 export function placeColumns(columns: KitchenColumn[]): PlacedColumn[] {
-  let x = 0
-  return columns.map((column) => {
-    const placed = { ...column, x }
-    x += column.width
-    return placed
-  })
+  return columns.map((column) => ({ ...column }))
 }
 
 export function worktopRuns(columns: KitchenColumn[]): WorktopRun[] {
   const runs: WorktopRun[] = []
-  let x = 0
-  let run: WorktopRun | null = null
-  for (const column of columns) {
-    if (column.kind === 'bas') {
-      if (!run) run = { x, width: 0 }
-      run.width += column.width
-    } else if (run) {
-      runs.push(run)
-      run = null
+  const walls = [...new Set(columns.map((column) => column.wallId))]
+  for (const wallId of walls) {
+    const sorted = columns.filter((column) => column.wallId === wallId).sort((a, b) => a.x - b.x)
+    let run: WorktopRun | null = null
+    for (const column of sorted) {
+      if (column.kind !== 'bas') {
+        if (run) runs.push(run)
+        run = null
+        continue
+      }
+      if (run && column.x <= run.x + run.width + 2) run.width = column.x + column.width - run.x
+      else {
+        if (run) runs.push(run)
+        run = { wallId, x: column.x, width: column.width }
+      }
     }
-    x += column.width
+    if (run) runs.push(run)
   }
-  if (run) runs.push(run)
   return runs
 }
 
@@ -90,22 +91,38 @@ function note(issues: KitchenIssue[], issue: KitchenIssue) {
 }
 
 export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[]; issues: KitchenIssue[] } {
-  const placed = placeColumns(project.columns)
+  const placed = placeColumns(project.columns.filter((column) => column.wallId !== 'ilot' || project.room.island))
   const issues: KitchenIssue[] = []
-  const total = sumWidths(project.columns.map((column) => column.width))
   const top = worktopTop(project.wall)
-  if (total !== project.wall.width) {
-    note(issues, {
-      level: 'refus',
-      columnId: null,
-      part: null,
-      overlapMm: Math.abs(project.wall.width - total),
-      message: `La somme des meubles (${total} mm) ne vaut pas la largeur du mur (${project.wall.width} mm).`,
-    })
-  }
 
   placed.forEach((column, index) => {
     const label = `Meuble ${index + 1}`
+    const length = wallLength(project, column.wallId)
+    const inset = cornerInset(project, column.wallId)
+    if (column.x < inset || column.x + column.width > length) {
+      note(issues, {
+        level: 'refus',
+        columnId: column.id,
+        part: 'meuble',
+        overlapMm: column.x < inset ? inset - column.x : column.x + column.width - length,
+        message: column.x < inset
+          ? `${label} entre dans l'angle de ${inset - column.x} mm.`
+          : `${label} dépasse le mur de ${column.x + column.width - length} mm.`,
+      })
+    }
+    for (const other of placed) {
+      if (other.wallId !== column.wallId || other.id >= column.id) continue
+      const overlap = Math.min(column.x + column.width, other.x + other.width) - Math.max(column.x, other.x)
+      if (overlap > 0) {
+        note(issues, {
+          level: 'refus',
+          columnId: column.id,
+          part: 'meuble',
+          overlapMm: overlap,
+          message: `${label} chevauche un autre meuble de ${overlap} mm.`,
+        })
+      }
+    }
     if (column.kind === 'colonne') {
       if (column.tower === 'frigo' && column.width < project.rules.frigoMinMm) {
         note(issues, {
@@ -118,6 +135,7 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
       }
       const body = towerSpan(project.wall, project.rules, column.x, column.width)
       for (const opening of project.openings) {
+        if (opening.wallId !== column.wallId) continue
         if (!overlaps(body, opening)) continue
         const mm = overlapWidth(body, opening)
         note(issues, {
@@ -145,6 +163,7 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
 
     const body = baseSpan(project.wall, column.x, column.width)
     for (const opening of project.openings) {
+        if (opening.wallId !== column.wallId) continue
       const across = overlapWidth(body, opening)
       if (across <= 0) continue
       if (opening.kind === 'fenetre') {
@@ -183,6 +202,7 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
     if (column.upper !== 'aucun') {
       const upper = upperSpan(project.wall, project.rules, column.x, column.width)
       for (const opening of project.openings) {
+        if (opening.wallId !== column.wallId) continue
         if (!overlaps(upper, opening)) continue
         const mm = overlapWidth(upper, opening)
         note(issues, {
@@ -203,6 +223,7 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
 function noteSwing(issues: KitchenIssue[], column: PlacedColumn, project: KitchenProject, label: string, top: number) {
   if (!hingedFront(column)) return
   for (const opening of project.openings) {
+        if (opening.wallId !== column.wallId) continue
     if (opening.kind !== 'porte' || opening.bottom >= top) continue
     const gapRight = opening.x - (column.x + column.width)
     const gapLeft = column.x - (opening.x + opening.width)
@@ -272,57 +293,69 @@ export function upperLabel(role: UpperRole): string {
 }
 
 export function setColumnWidth(project: KitchenProject, index: number, width: number): { ok: true; columns: KitchenColumn[] } | { ok: false; error: string } {
-  const result = setCaissonWidth(
-    project.columns.map((column) => column.width),
-    index,
-    width,
-    project.columns.map((column) => column.locked),
-  )
-  if (!result.ok) return result
-  return {
-    ok: true,
-    columns: project.columns.map((column, cursor) => ({ ...column, width: result.widths[cursor] })),
+  const column = project.columns[index]
+  if (!column) return { ok: false, error: 'Meuble introuvable.' }
+  if (!Number.isInteger(width) || width < COLUMN_MIN || width > COLUMN_MAX) {
+    return { ok: false, error: `Largeur : la limite est ${COLUMN_MIN}–${COLUMN_MAX} mm.` }
   }
+  const room = wallLength(project, column.wallId)
+  if (column.x + width > room) return { ok: false, error: `Largeur refusée : le meuble sortirait du mur.` }
+  return { ok: true, columns: project.columns.map((item, cursor) => (cursor === index ? { ...item, width } : item)) }
 }
 
-export function resizeKitchenWall(project: KitchenProject, width: number): { ok: true; columns: KitchenColumn[] } | { ok: false; error: string } {
-  const widths = redistribute(
-    project.columns.map((column) => column.width),
-    width,
-    project.columns.map((column) => column.locked),
-  )
-  if (!widths) return { ok: false, error: 'Largeur refusée : les meubles verrouillés ne laissent pas assez de jeu.' }
-  return {
-    ok: true,
-    columns: project.columns.map((column, index) => ({ ...column, width: widths[index] })),
-  }
+export function resizeKitchenWall(project: KitchenProject, _width: number): { ok: true; columns: KitchenColumn[] } | { ok: false; error: string } {
+  return { ok: true, columns: project.columns }
+}
+
+export function placeColumn(project: KitchenProject, id: string, x: number): KitchenColumn[] {
+  const column = project.columns.find((item) => item.id === id)
+  if (!column || column.locked) return project.columns
+  const mates = project.columns.filter((item) => item.wallId === column.wallId)
+  const next = slideAlong(mates, id, column.width, x, cornerInset(project, column.wallId), wallLength(project, column.wallId))
+  return project.columns.map((item) => (item.id === id ? { ...item, x: next } : item))
 }
 
 export function addKitchenColumn(
-  columns: KitchenColumn[],
+  project: KitchenProject,
+  wallId: WallId,
   createId: () => string,
 ): { ok: true; columns: KitchenColumn[]; selectedIndex: number } | { ok: false; error: string } {
-  const unlocked = columns.map((column, index) => ({ column, index })).filter((item) => !item.column.locked)
-  if (unlocked.length === 0) return { ok: false, error: 'Ajout refusé : tous les meubles sont verrouillés.' }
-  let best = unlocked[0]
-  for (const item of unlocked) if (item.column.width > best.column.width) best = item
-  const left = Math.floor(best.column.width / 2)
-  const right = best.column.width - left
-  if (left < COLUMN_MIN || right < COLUMN_MIN) {
-    return { ok: false, error: `Ajout refusé : aucun meuble ne peut être coupé en deux parties d'au moins ${COLUMN_MIN} mm.` }
+  const length = wallLength(project, wallId)
+  const inset = cornerInset(project, wallId)
+  const blocked = [
+    ...project.columns.filter((column) => column.wallId === wallId).map((column) => ({ x: column.x, width: column.width })),
+    ...project.openings.filter((opening) => opening.wallId === wallId && opening.kind !== 'fenetre').map((opening) => ({ x: opening.x, width: opening.width })),
+  ].sort((a, b) => a.x - b.x)
+  let cursor = inset
+  let spot = -1
+  let width = 600
+  for (const item of blocked) {
+    if (item.x - cursor >= 300) {
+      spot = cursor
+      width = Math.min(600, item.x - cursor)
+      break
+    }
+    cursor = Math.max(cursor, item.x + item.width)
   }
-  const next = columns.map((column) => ({ ...column }))
-  next[best.index] = { ...next[best.index], width: left }
-  next.splice(best.index + 1, 0, {
-    ...best.column,
+  if (spot < 0 && length - cursor >= 300) {
+    spot = cursor
+    width = Math.min(600, length - cursor)
+  }
+  if (spot < 0 || width < COLUMN_MIN) return { ok: false, error: 'Ajout refusé : pas de place libre de 300 mm sur ce mur.' }
+  const created: KitchenColumn = {
     id: createId(),
-    width: right,
+    wallId,
+    x: spot,
+    width,
     locked: false,
     kind: 'bas',
     base: 'porte',
+    tower: 'frigo',
     upper: 'aucun',
-  })
-  return { ok: true, columns: next, selectedIndex: best.index + 1 }
+    handle: 'bouton',
+  }
+  const columns = [...project.columns, created]
+  return { ok: true, columns, selectedIndex: columns.length - 1 }
 }
 
 export function removeKitchenColumn(
@@ -331,18 +364,6 @@ export function removeKitchenColumn(
 ): { ok: true; columns: KitchenColumn[]; selectedIndex: number } | { ok: false; error: string } {
   if (columns.length <= 1) return { ok: false, error: 'Suppression refusée : il reste un seul meuble.' }
   if (index < 0 || index >= columns.length) return { ok: false, error: 'Meuble introuvable.' }
-  const locked = columns.map((column) => column.locked)
-  const order: number[] = []
-  if (index < columns.length - 1) {
-    for (let cursor = index + 1; cursor < columns.length; cursor += 1) order.push(cursor)
-  }
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) order.push(cursor)
-  const recipient = order.find((cursor) => !locked[cursor])
-  if (recipient === undefined) return { ok: false, error: 'Suppression refusée : les autres meubles sont verrouillés.' }
-  const merged = columns[recipient].width + columns[index].width
-  if (merged > COLUMN_MAX) return { ok: false, error: `Suppression refusée : le meuble voisin passerait à ${merged} mm.` }
   const next = columns.filter((_, cursor) => cursor !== index)
-  const recipientIndex = recipient > index ? recipient - 1 : recipient
-  next[recipientIndex] = { ...next[recipientIndex], width: merged }
-  return { ok: true, columns: next, selectedIndex: recipientIndex }
+  return { ok: true, columns: next, selectedIndex: Math.min(index, next.length - 1) }
 }

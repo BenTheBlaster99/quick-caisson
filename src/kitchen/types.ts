@@ -1,9 +1,12 @@
 export type HandleId = 'aucune' | 'integre' | 'bouton' | 'barre'
 export type KitchenFinishId = 'blanc' | 'chene-clair' | 'chene' | 'chene-fonce' | 'gris' | 'noir'
+export type WallFinishId = 'blanc' | 'greige' | 'sable' | 'gris' | 'sauge' | 'bleu' | 'terre' | 'noir' | 'carrelage' | 'beton' | 'bois'
 export type OpeningKind = 'fenetre' | 'porte' | 'interdit'
 export type BaseRole = 'porte' | 'tiroirs' | 'evier' | 'plaque' | 'four' | 'four-plaque' | 'lave-vaisselle' | 'bouteilles'
 export type UpperRole = 'aucun' | 'haut' | 'hotte' | 'vitrine' | 'micro-ondes'
 export type TowerRole = 'frigo' | 'rangement'
+export type KitchenShape = 'lineaire' | 'l' | 'u'
+export type WallId = 'A' | 'B' | 'C' | 'D' | 'ilot'
 
 export type KitchenWall = {
   width: number
@@ -16,8 +19,22 @@ export type KitchenWall = {
   backsplashHeight: number
 }
 
+export type WallFinishes = Record<'A' | 'B' | 'C' | 'D', WallFinishId>
+
+export type KitchenRoom = {
+  shape: KitchenShape
+  depth: number
+  island: boolean
+  islandLength: number
+  islandDepth: number
+  islandX: number
+  islandZ: number
+  finishes: WallFinishes
+}
+
 export type Opening = {
   id: string
+  wallId: WallId
   kind: OpeningKind
   x: number
   width: number
@@ -27,6 +44,8 @@ export type Opening = {
 
 export type KitchenColumn = {
   id: string
+  wallId: WallId
+  x: number
   width: number
   locked: boolean
   kind: 'bas' | 'colonne'
@@ -56,6 +75,7 @@ export type KitchenProject = {
   format: 'kitchen-project'
   version: 1
   name: string
+  room: KitchenRoom
   wall: KitchenWall
   openings: Opening[]
   columns: KitchenColumn[]
