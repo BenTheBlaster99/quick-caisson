@@ -25,7 +25,7 @@ describe('kitchen room', () => {
 
   it('warns when a hob sits under a full upper and still cuts that cabinet', () => {
     const kitchen = defaultKitchen()
-    kitchen.columns[0].base = 'plaque'
+    kitchen.columns[0].deck = 'plaque'
     const issue = inspectKitchen(kitchen).issues.find((item) => item.columnId === 'k1')
     expect(issue?.level).toBe('attention')
     expect(issue?.message).toMatch(/hotte/)
@@ -43,7 +43,7 @@ describe('kitchen room', () => {
       finish: string
       name?: string
       room?: unknown
-      columns: { wallId?: string; x?: number }[]
+      columns: { id?: string; wallId?: string; x?: number; base?: string; deck?: string; handle?: string }[]
       openings: { wallId?: string }[]
     }
     raw.finish = 'anthracite'
@@ -52,6 +52,12 @@ describe('kitchen room', () => {
     for (const column of raw.columns) {
       delete column.wallId
       delete column.x
+    }
+    const bottles = raw.columns.find((column) => column.id === 'k5')
+    if (bottles) {
+      bottles.base = 'bouteilles'
+      delete bottles.deck
+      bottles.handle = 'integre'
     }
     for (const opening of raw.openings) delete opening.wallId
     const opened = parseKitchen(JSON.stringify(raw))
@@ -63,6 +69,11 @@ describe('kitchen room', () => {
     expect(opened.columns[0].x).toBe(0)
     expect(opened.columns[1].x).toBe(opened.columns[0].width)
     expect(opened.room.finishes).toEqual({ A: 'blanc', B: 'blanc', C: 'blanc', D: 'blanc' })
+    expect(opened.room.lSide).toBe('gauche')
+    const kept = opened.columns.find((column) => column.id === 'k5')
+    expect(kept?.base).toBe('porte')
+    expect(kept?.deck).toBe('rien')
+    expect(kept?.handle).toBe('aucune')
   })
 
   it('refuses a sink narrower than the appliance rule', () => {
@@ -116,6 +127,7 @@ describe('kitchen room', () => {
   it('cuts a worktop that stops at the tall unit', () => {
     const rows = buildKitchenCutList(defaultKitchen())
     expect(rows.find((row) => row.role === 'plan de travail' && row.length === 3000)).toMatchObject({ length: 3000, thickness: 38 })
-    expect(rows.find((row) => row.role === 'crédence' && row.length === 3000)).toMatchObject({ length: 3000, width: 600 })
+    expect(rows.some((row) => row.role === 'crédence' && row.length === 3000)).toBe(false)
+    expect(rows.find((row) => row.role === 'crédence' && row.length === 1200)).toMatchObject({ width: 600 })
   })
 })

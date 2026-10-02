@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { recordChange, redoChange, undoChange } from '../domain/history'
 import { createId } from '../domain/project'
-import { addKitchenColumn, canCorrectIssue, inspectKitchen, removeKitchenColumn, setColumnWidth } from '../kitchen/layout'
+import { addKitchenColumn, canCorrectIssue, inspectKitchen, removeKitchenColumn, setColumnWidth, swapColumn, type KitchenAdd } from '../kitchen/layout'
 import {
   addOpening,
   defaultKitchen,
@@ -12,12 +12,13 @@ import {
   serializeKitchen,
   setIsland,
   setKitchenWall,
+  setLSide,
   setRoomDepth,
   setShape,
   setWallFinish,
   updateOpening,
 } from '../kitchen/project'
-import type { BaseRole, HandleId, KitchenColumn, KitchenFinishId, KitchenProject, KitchenShape, KitchenWall, Opening, OpeningKind, TowerRole, UpperRole, WallFinishId, WallId } from '../kitchen/types'
+import type { BaseRole, DeckRole, HandleId, KitchenColumn, KitchenFinishId, KitchenProject, KitchenShape, KitchenWall, LSide, Opening, OpeningKind, TowerRole, UpperRole, WallFinishId, WallId } from '../kitchen/types'
 
 type Snap = { project: KitchenProject; selectedId: string }
 
@@ -31,11 +32,13 @@ type KitchenApi = {
   setWall: (field: keyof KitchenWall, value: number) => boolean
   setDepth: (depth: number) => boolean
   setShape: (shape: KitchenShape) => void
+  setLSide: (side: LSide) => void
   setIsland: (island: boolean) => void
   setWidth: (width: number) => boolean
   setLocked: (locked: boolean) => void
   setKind: (kind: KitchenColumn['kind']) => void
   setBase: (base: BaseRole) => void
+  setDeck: (deck: DeckRole) => void
   setTower: (tower: TowerRole) => void
   setUpper: (upper: UpperRole) => void
   setHandle: (handle: HandleId) => void
@@ -43,19 +46,21 @@ type KitchenApi = {
   setWallFinish: (wallId: 'A' | 'B' | 'C' | 'D', finish: WallFinishId) => void
   setName: (name: string) => void
   correct: (columnId: string) => void
-  add: (wallId: WallId) => void
+  add: (wallId: WallId, spec: KitchenAdd) => void
+  swap: (direction: -1 | 1) => void
   remove: () => void
   select: (id: string) => void
   placeColumn: (id: string, x: number) => void
   placeOpening: (id: string, patch: { x: number; bottom: number }) => void
   placeIsland: (x: number, z: number) => void
   addZone: (kind: OpeningKind, wallId?: WallId) => void
-  setZone: (id: string, patch: Partial<Pick<Opening, 'x' | 'width' | 'bottom' | 'height'>>) => boolean
+  setZone: (id: string, patch: Partial<Pick<Opening, 'x' | 'width' | 'bottom' | 'height' | 'swing'>>) => boolean
   removeZone: (id: string) => void
   undo: () => void
   redo: () => void
   save: () => void
   openText: (text: string) => void
+  replace: (next: KitchenProject) => void
 }
 
 const KitchenContext = createContext<KitchenApi | null>(null)
@@ -176,6 +181,12 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         setProject(setIsland(project, island))
         setNotice(null)
       },
+      setLSide(side) {
+        if (project.room.lSide === side) return
+        remember()
+        setProject(setLSide(project, side))
+        setNotice(null)
+      },
       setWidth(width) {
         const index = project.columns.findIndex((column) => column.id === selected.id)
         const result = setColumnWidth(project, index, width)
@@ -196,12 +207,17 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       },
       setKind(kind) {
         remember()
-        replaceSelected({ ...selected, kind, upper: kind === 'colonne' ? 'aucun' : selected.upper })
+        replaceSelected({ ...selected, kind, upper: kind === 'bas' ? selected.upper : 'aucun' })
         setNotice(null)
       },
       setBase(base) {
         remember()
         replaceSelected({ ...selected, kind: 'bas', base })
+        setNotice(null)
+      },
+      setDeck(deck) {
+        remember()
+        replaceSelected({ ...selected, deck })
         setNotice(null)
       },
       setTower(tower) {
@@ -251,8 +267,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         })
         setNotice(null)
       },
-      add(wallId) {
-        const result = addKitchenColumn(project, wallId, createId)
+      add(wallId, spec) {
+        const result = addKitchenColumn(project, wallId, spec, createId)
         if (!result.ok) {
           setNotice(result.error)
           return
@@ -260,6 +276,16 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         remember()
         setProject({ ...project, columns: result.columns })
         setSelectedId(result.columns[result.selectedIndex].id)
+        setNotice(null)
+      },
+      swap(direction) {
+        const result = swapColumn(project, selected.id, direction)
+        if (!result.ok) {
+          setNotice(result.error)
+          return
+        }
+        remember()
+        setProject({ ...project, columns: result.columns })
         setNotice(null)
       },
       placeColumn(id, x) {
@@ -350,6 +376,12 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           setNotice(error instanceof Error ? error.message : 'Fichier refusé.')
         }
+      },
+      replace(next) {
+        remember()
+        setProject(next)
+        if (!next.columns.some((column) => column.id === selectedId)) setSelectedId(next.columns[0].id)
+        setNotice(null)
       },
     }
   }, [historyMark, issues, notice, project, selected])

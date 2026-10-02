@@ -1,6 +1,6 @@
 import { kitchenFinish } from './finishes'
 import type { CutRow } from '../domain/types'
-import { inspectKitchen, upperSpan, worktopRuns, worktopTop } from './layout'
+import { cutRun, inspectKitchen, upperSpan, worktopRuns, worktopTop } from './layout'
 import type { KitchenProject } from './types'
 
 const ROLE = {
@@ -35,8 +35,8 @@ export function buildKitchenCutList(project: KitchenProject): CutRow[] {
       pushCarcass(rows, project, label, index, column.width, project.wall.ceilingHeight - project.rules.towerGapMm, project.wall.baseDepth, true)
       return
     }
-    pushCarcass(rows, project, label, index, column.width, project.wall.baseHeight, project.wall.baseDepth, column.base === 'porte' || column.base === 'evier' || column.base === 'bouteilles')
-    if (column.base === 'tiroirs' || column.base === 'plaque' || column.base === 'four' || column.base === 'four-plaque' || column.base === 'lave-vaisselle') {
+    pushCarcass(rows, project, label, index, column.width, project.wall.baseHeight, project.wall.baseDepth, column.base === 'porte')
+    if (column.base === 'tiroirs' || column.base === 'four' || column.base === 'lave-vaisselle') {
       push(rows, {
         caisson: label,
         caissonIndex: index,
@@ -53,19 +53,6 @@ export function buildKitchenCutList(project: KitchenProject): CutRow[] {
       const span = upperSpan(project.wall, project.rules, column.x, column.width)
       pushCarcass(rows, project, label, index, column.width, span.top - span.bottom, project.wall.upperDepth, true)
     }
-    if (project.wall.plinthHeight > 0) {
-      push(rows, {
-        caisson: label,
-        caissonIndex: index,
-        role: 'socle avant',
-        roleOrder: ROLE.socle,
-        quantity: 1,
-        ...longSide(column.width, project.wall.plinthHeight),
-        thickness: carcass,
-        material,
-        edges: 'avant',
-      })
-    }
   })
 
   runs.forEach((run, index) => {
@@ -80,18 +67,37 @@ export function buildKitchenCutList(project: KitchenProject): CutRow[] {
       material: 'plan',
       edges: 'avant',
     })
-    if (run.wallId !== 'ilot' && project.wall.backsplashHeight > 0) {
+    if (project.wall.plinthHeight > 0) {
       push(rows, {
         caisson: 'plan',
         caissonIndex: 2000 + index,
-        role: 'crédence',
-        roleOrder: ROLE.credence,
+        role: 'socle avant',
+        roleOrder: ROLE.socle,
         quantity: 1,
-        ...longSide(run.width, project.wall.backsplashHeight),
-        thickness: project.rules.backsplashMm,
-        material: 'crédence',
-        edges: 'aucun',
+        ...longSide(run.width, project.wall.plinthHeight),
+        thickness: carcass,
+        material,
+        edges: 'avant',
       })
+    }
+    if (run.wallId !== 'ilot' && project.wall.backsplashHeight > 0) {
+      const top = worktopTop(project.wall)
+      const holes = project.openings
+        .filter((opening) => opening.wallId === run.wallId && opening.kind === 'fenetre' && opening.bottom < top + project.wall.backsplashHeight && opening.bottom + opening.height > top)
+        .map((opening) => ({ x: opening.x, width: opening.width }))
+      for (const part of cutRun(run.x, run.width, holes)) {
+        push(rows, {
+          caisson: 'plan',
+          caissonIndex: 2000 + index,
+          role: 'crédence',
+          roleOrder: ROLE.credence,
+          quantity: 1,
+          ...longSide(part.width, project.wall.backsplashHeight),
+          thickness: project.rules.backsplashMm,
+          material: 'crédence',
+          edges: 'aucun',
+        })
+      }
     }
   })
 

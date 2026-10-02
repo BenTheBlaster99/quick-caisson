@@ -92,7 +92,10 @@ export function MmField({
 
   return (
     <div className="field">
-      <span>{label}</span>
+      <div className="field-head">
+        <span>{label}</span>
+        <small>{hint}</small>
+      </div>
       <div className="mm">
         <button
           type="button"
@@ -126,7 +129,6 @@ export function MmField({
           +
         </button>
       </div>
-      <small>{hint}</small>
     </div>
   )
 }

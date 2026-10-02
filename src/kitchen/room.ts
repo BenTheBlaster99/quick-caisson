@@ -1,7 +1,8 @@
-import type { KitchenProject, KitchenRoom, KitchenShape, WallId } from './types'
+import type { KitchenProject, KitchenRoom, KitchenShape, LSide, WallId } from './types'
 import { blankWallFinishes } from './finishes'
 
 export const WALLS: WallId[] = ['A', 'B', 'C', 'D', 'ilot']
+export const WALL_THICK = 100
 
 export function wallName(id: WallId): string {
   if (id === 'A') return 'Mur du fond'
@@ -17,19 +18,19 @@ export function wallLength(project: Pick<KitchenProject, 'room' | 'wall'>, wallI
   return project.wall.width
 }
 
-export function cornerInset(project: Pick<KitchenProject, 'room' | 'wall'>, wallId: WallId): number {
-  if (wallId === 'B' && (project.room.shape === 'l' || project.room.shape === 'u')) return project.wall.baseDepth
-  if (wallId === 'C' && project.room.shape === 'u') return project.wall.baseDepth
+export function cornerInset(project: Pick<KitchenProject, 'room' | 'wall' | 'columns'>, wallId: WallId): number {
+  const angle = project.columns.find((column) => column.kind === 'angle' && column.returnWall === wallId)
+  if (angle) return angle.width
+  const side = project.room.lSide
+  if (wallId === 'B' && (project.room.shape === 'u' || (project.room.shape === 'l' && side !== 'droite'))) return project.wall.baseDepth
+  if (wallId === 'C' && (project.room.shape === 'u' || (project.room.shape === 'l' && side === 'droite'))) return project.wall.baseDepth
   return 0
 }
 
-/** Linéaire is the back wall, L adds the left wall, U adds the right wall. A wall with a door or a window stays even so the opening has something to sit in. */
-export function builtWalls(shape: KitchenShape, openings: { wallId: WallId }[] = []): WallId[] {
-  const ids: WallId[] = shape === 'u' ? ['A', 'B', 'C'] : shape === 'l' ? ['A', 'B'] : ['A']
-  for (const id of ['B', 'C', 'D'] as const) {
-    if (!ids.includes(id) && openings.some((opening) => opening.wallId === id)) ids.push(id)
-  }
-  return ids
+export function builtWalls(shape: KitchenShape, lSide: LSide = 'gauche'): WallId[] {
+  if (shape === 'lineaire') return ['A']
+  if (shape === 'l') return lSide === 'droite' ? ['A', 'C'] : ['A', 'B']
+  return ['A', 'B', 'C']
 }
 
 export function defaultRoom(width: number): KitchenRoom {
@@ -41,6 +42,7 @@ export function defaultRoom(width: number): KitchenRoom {
     islandDepth: 700,
     islandX: Math.round((width - 1400) / 2),
     islandZ: 1500,
+    lSide: 'gauche',
     finishes: blankWallFinishes(),
   }
 }

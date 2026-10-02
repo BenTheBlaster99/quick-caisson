@@ -4,11 +4,11 @@ import { defaultRoom, footprint, mountRun, builtWalls } from './room'
 import type { WallId } from './types'
 
 describe('room mounts', () => {
-  it('builds one wall, an L, or a U, and keeps a wall that has an opening', () => {
+  it('builds a straight wall, an L on either side, or a U', () => {
     expect(builtWalls('lineaire')).toEqual(['A'])
-    expect(builtWalls('l')).toEqual(['A', 'B'])
+    expect(builtWalls('l', 'gauche')).toEqual(['A', 'B'])
+    expect(builtWalls('l', 'droite')).toEqual(['A', 'C'])
     expect(builtWalls('u')).toEqual(['A', 'B', 'C'])
-    expect(builtWalls('l', [{ wallId: 'D' }])).toEqual(['A', 'B', 'D'])
   })
   it('keeps a run on every wall inside its footprint', () => {
     const width = 3600

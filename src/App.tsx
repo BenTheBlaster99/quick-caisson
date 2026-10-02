@@ -12,6 +12,7 @@ import { WallForm } from './components/WallForm'
 import { cutRowKey } from './domain/cutlist'
 import type { CutRow } from './domain/types'
 import { useProject } from './state/project-context'
+import { CopilotBar } from './components/CopilotBar'
 
 const STEPS = [
   { id: 'mur', label: 'Le mur' },
@@ -176,6 +177,7 @@ export function App() {
           </section>
         </main>
       )}
+      <CopilotBar mode="dressing" />
     </div>
     <PrintSheet project={project} selectedId={selected.id} />
     </>

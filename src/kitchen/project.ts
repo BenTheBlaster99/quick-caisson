@@ -5,12 +5,14 @@ import { defaultKitchenProfile, readKitchenProfile } from './profile'
 import { defaultRoom, wallLength, WALLS } from './room'
 import type {
   BaseRole,
+  DeckRole,
   HandleId,
   KitchenColumn,
   KitchenProject,
   KitchenRoom,
   KitchenShape,
   KitchenWall,
+  LSide,
   Opening,
   OpeningKind,
   TowerRole,
@@ -19,12 +21,13 @@ import type {
   WallId,
 } from './types'
 
-const HANDLES: HandleId[] = ['aucune', 'integre', 'bouton', 'barre']
-const BASES: BaseRole[] = ['porte', 'tiroirs', 'evier', 'plaque', 'four', 'four-plaque', 'lave-vaisselle', 'bouteilles']
+const HANDLES: HandleId[] = ['aucune', 'bouton', 'barre']
+const BASES: BaseRole[] = ['porte', 'tiroirs', 'four', 'lave-vaisselle']
 const UPPERS: UpperRole[] = ['aucun', 'haut', 'hotte', 'vitrine', 'micro-ondes']
 const TOWERS: TowerRole[] = ['frigo', 'rangement']
 const OPENINGS: OpeningKind[] = ['fenetre', 'porte', 'interdit']
 const SHAPES: KitchenShape[] = ['lineaire', 'l', 'u']
+const SIDES: LSide[] = ['gauche', 'droite']
 
 const WALL_LIMITS: Record<keyof KitchenWall, { min: number; max: number; label: string }> = {
   width: { min: 1800, max: 6000, label: 'Largeur' },
@@ -61,15 +64,14 @@ export function defaultKitchen(): KitchenProject {
     room: defaultRoom(3600),
     wall,
     openings: [
-      { id: 'o1', wallId: 'A', kind: 'fenetre', x: 1200, width: 1400, bottom: 1100, height: 1000 },
-      { id: 'o2', wallId: 'D', kind: 'porte', x: 80, width: 800, bottom: 0, height: 2100 },
+      { id: 'o1', wallId: 'A', kind: 'fenetre', x: 1200, width: 1400, bottom: 1100, height: 1000, swing: 'gauche' },
     ],
     columns: [
       column('k1', 'A', 0, 600, { base: 'porte', upper: 'haut' }),
       column('k2', 'A', 600, 600, { base: 'tiroirs', upper: 'haut' }),
-      column('k3', 'A', 1200, 800, { base: 'evier', upper: 'aucun' }),
-      column('k4', 'A', 2000, 600, { base: 'four-plaque', upper: 'aucun' }),
-      column('k5', 'A', 2600, 400, { base: 'bouteilles', upper: 'haut' }),
+      column('k3', 'A', 1200, 800, { base: 'porte', deck: 'evier', upper: 'aucun' }),
+      column('k4', 'A', 2000, 600, { base: 'four', deck: 'plaque', upper: 'aucun' }),
+      column('k5', 'A', 2600, 400, { base: 'porte', upper: 'haut' }),
       column('k6', 'A', 3000, 600, { kind: 'colonne', tower: 'frigo', upper: 'aucun' }),
       column('b1', 'B', 560, 600, { base: 'porte', upper: 'haut' }),
       column('b2', 'B', 1160, 600, { kind: 'colonne', tower: 'rangement', upper: 'aucun' }),
@@ -86,18 +88,21 @@ function column(
   wallId: WallId,
   x: number,
   width: number,
-  options: Partial<Pick<KitchenColumn, 'kind' | 'base' | 'tower' | 'upper' | 'handle' | 'locked'>> = {},
+  options: Partial<Pick<KitchenColumn, 'kind' | 'base' | 'deck' | 'returnWall' | 'tower' | 'upper' | 'handle' | 'locked'>> = {},
 ): KitchenColumn {
+  const kind = options.kind ?? 'bas'
   return {
     id,
     wallId,
     x,
     width,
     locked: options.locked ?? false,
-    kind: options.kind ?? 'bas',
+    kind,
     base: options.base ?? 'porte',
+    deck: options.deck ?? 'rien',
+    returnWall: options.returnWall ?? 'B',
     tower: options.tower ?? 'frigo',
-    upper: options.kind === 'colonne' ? 'aucun' : (options.upper ?? 'haut'),
+    upper: kind === 'bas' ? (options.upper ?? 'haut') : 'aucun',
     handle: options.handle ?? 'bouton',
   }
 }
@@ -123,7 +128,9 @@ export function parseKitchen(text: string): KitchenProject {
   const room = readRoom(data.room, wall.width)
   if (!Array.isArray(data.openings)) throw new Error('Ouvertures illisibles.')
   if (!Array.isArray(data.columns) || data.columns.length === 0) throw new Error('La cuisine doit contenir au moins un meuble.')
-  const openings = data.openings.map((item, index) => readOpening(item, index, { room, wall }))
+  const openings = data.openings
+    .map((item, index) => readOpening(item, index, { room, wall }))
+    .filter((opening) => opening.wallId !== 'D')
   const columns = fillX(data.columns.map((item, index) => readColumn(item, index)))
   const project: KitchenProject = { format: 'kitchen-project', version: 1, name, room, wall, openings, columns, finish, rules }
   return project
@@ -151,6 +158,10 @@ export function setShape(project: KitchenProject, shape: KitchenShape): KitchenP
   return { ...project, room: { ...project.room, shape } }
 }
 
+export function setLSide(project: KitchenProject, lSide: LSide): KitchenProject {
+  return { ...project, room: { ...project.room, lSide } }
+}
+
 export function setIsland(project: KitchenProject, island: boolean): KitchenProject {
   return { ...project, room: { ...project.room, island } }
 }
@@ -175,13 +186,13 @@ export function addOpening(project: KitchenProject, kind: OpeningKind, wallId: W
   const bottom = kind === 'porte' ? 0 : kind === 'fenetre' ? 1000 : 0
   const height = kind === 'porte' ? 2100 : kind === 'fenetre' ? 1000 : 800
   const x = Math.max(0, Math.min(length - width, Math.round(length / 3)))
-  const opening: Opening = { id: createId(), wallId, kind, x, width, bottom, height }
+  const opening: Opening = { id: createId(), wallId, kind, x, width, bottom, height, swing: 'gauche' }
   const error = openingError(opening, project)
   if (error) return { ok: false, error: 'Ouverture refusée : elle ne tient pas dans ce mur.' }
   return { ok: true, project: { ...project, openings: [...project.openings, opening] } }
 }
 
-export function updateOpening(project: KitchenProject, id: string, patch: Partial<Pick<Opening, 'wallId' | 'x' | 'width' | 'bottom' | 'height' | 'kind'>>): KitchenEdit {
+export function updateOpening(project: KitchenProject, id: string, patch: Partial<Pick<Opening, 'wallId' | 'x' | 'width' | 'bottom' | 'height' | 'kind' | 'swing'>>): KitchenEdit {
   const current = project.openings.find((opening) => opening.id === id)
   if (!current) return { ok: false, error: 'Ouverture introuvable.' }
   const next = { ...current, ...patch }
@@ -199,7 +210,7 @@ export function removeOpening(project: KitchenProject, id: string): KitchenProje
 }
 
 function openingError(opening: Opening, project: Pick<KitchenProject, 'room' | 'wall'>): string | null {
-  if (opening.wallId === 'ilot') return 'Ouverture : un îlot n’a pas de porte ni de fenêtre.'
+  if (opening.wallId === 'ilot' || opening.wallId === 'D') return 'Ouverture : ce mur n’existe pas.'
   if (!Number.isInteger(opening.x) || !Number.isInteger(opening.width) || !Number.isInteger(opening.bottom) || !Number.isInteger(opening.height)) {
     return 'Ouverture : indiquez des millimètres entiers.'
   }
@@ -218,13 +229,14 @@ function readRoom(value: unknown, width: number): KitchenRoom {
   const islandDepth = integerBetween(value.islandDepth ?? 700, 500, 1200, 'Profondeur d’îlot hors 500–1200 mm.')
   const islandX = integerBetween(value.islandX ?? Math.round((width - islandLength) / 2), 0, width, 'Position d’îlot hors de la pièce.')
   const islandZ = integerBetween(value.islandZ ?? 1500, 0, depth, 'Position d’îlot hors de la pièce.')
+  const lSide = value.lSide === 'droite' ? 'droite' : readEnum(value.lSide ?? 'gauche', SIDES, 'Côté du L inconnu.')
   const finishes = {
     A: readWallFinish(isRecord(value.finishes) ? value.finishes.A : undefined),
     B: readWallFinish(isRecord(value.finishes) ? value.finishes.B : undefined),
     C: readWallFinish(isRecord(value.finishes) ? value.finishes.C : undefined),
     D: readWallFinish(isRecord(value.finishes) ? value.finishes.D : undefined),
   }
-  return { shape, depth, island, islandLength, islandDepth, islandX, islandZ, finishes }
+  return { shape, depth, island, islandLength, islandDepth, islandX, islandZ, lSide, finishes }
 }
 
 function integerBetween(value: unknown, min: number, max: number, message: string): number {
@@ -259,6 +271,7 @@ function readOpening(value: unknown, index: number, project: Pick<KitchenProject
     width: value.width as number,
     bottom: value.bottom as number,
     height: value.height as number,
+    swing: value.swing === 'droite' ? 'droite' : 'gauche',
   }
   const error = openingError(opening, project)
   if (error) throw new Error(error)
@@ -271,10 +284,14 @@ function readColumn(value: unknown, index: number): KitchenColumn {
   if (!Number.isInteger(width) || (width as number) < 300 || (width as number) > 1200) {
     throw new Error(`Meuble ${index + 1} : largeur hors 300–1200 mm.`)
   }
-  const kind = value.kind === 'colonne' ? 'colonne' : 'bas'
+  const kind = value.kind === 'colonne' ? 'colonne' : value.kind === 'angle' ? 'angle' : 'bas'
   const wallId = typeof value.wallId === 'string' && (WALLS as readonly string[]).includes(value.wallId)
     ? value.wallId as WallId
     : 'A'
+  const front = readFront(value.base, index)
+  const deck = value.deck === 'evier' || value.deck === 'plaque' || value.deck === 'rien'
+    ? value.deck
+    : front.deck
   return {
     id: typeof value.id === 'string' && value.id.trim() ? value.id : `k${index + 1}`,
     wallId,
@@ -282,11 +299,28 @@ function readColumn(value: unknown, index: number): KitchenColumn {
     width: width as number,
     locked: value.locked === true,
     kind,
-    base: readEnum(value.base ?? 'porte', BASES, `Meuble ${index + 1} : type bas inconnu.`),
+    base: front.base,
+    deck,
+    returnWall: value.returnWall === 'C' ? 'C' : 'B',
     tower: readEnum(value.tower ?? 'frigo', TOWERS, `Meuble ${index + 1} : colonne inconnue.`),
-    upper: kind === 'colonne' ? 'aucun' : readEnum(value.upper ?? 'aucun', UPPERS, `Meuble ${index + 1} : haut inconnu.`),
-    handle: readEnum(value.handle ?? 'bouton', HANDLES, `Meuble ${index + 1} : poignée inconnue.`),
+    upper: kind === 'bas' ? readEnum(value.upper ?? 'aucun', UPPERS, `Meuble ${index + 1} : haut inconnu.`) : 'aucun',
+    handle: readHandle(value.handle),
   }
+}
+
+function readFront(value: unknown, index: number): { base: BaseRole; deck: DeckRole } {
+  if (value === 'evier') return { base: 'porte', deck: 'evier' }
+  if (value === 'plaque') return { base: 'tiroirs', deck: 'plaque' }
+  if (value === 'four-plaque') return { base: 'four', deck: 'plaque' }
+  if (value === 'bouteilles' || value === 'porte' || value == null) return { base: 'porte', deck: 'rien' }
+  if (value === 'integre') return { base: 'porte', deck: 'rien' }
+  return { base: readEnum(value, BASES, `Meuble ${index + 1} : type bas inconnu.`), deck: 'rien' }
+}
+
+function readHandle(value: unknown): HandleId {
+  if (value === 'integre') return 'aucune'
+  if (value == null) return 'bouton'
+  return readEnum(value, HANDLES, 'Poignée inconnue.')
 }
 
 function fillX(columns: KitchenColumn[]): KitchenColumn[] {

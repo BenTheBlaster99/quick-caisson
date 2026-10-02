@@ -5,6 +5,15 @@ export function sumWidths(widths: number[]): number {
   return widths.reduce((total, width) => total + width, 0)
 }
 
+/** Equal bays in whole millimetres. The leftover millimetres go to the rightmost bays, one each. */
+export function allocateEqualWidths(total: number, count: number): number[] {
+  const base = Math.floor(total / count)
+  const extra = total - base * count
+  const widths = Array.from({ length: count }, () => base)
+  for (let index = 0; index < extra; index += 1) widths[count - 1 - index] += 1
+  return widths
+}
+
 export function caissonCountLabel(count: number): string {
   return count > 1 ? `${count} caissons` : `${count} caisson`
 }

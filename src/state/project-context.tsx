@@ -38,6 +38,7 @@ type ProjectApi = {
   reframe: () => void
   save: () => void
   openText: (text: string) => void
+  replace: (next: Project) => void
 }
 
 const ProjectContext = createContext<ProjectApi | null>(null)
@@ -319,6 +320,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           setNotice(error instanceof Error ? error.message : 'Fichier refusé.')
         }
+      },
+      replace(next) {
+        remember()
+        setProject(next)
+        if (!next.caissons.some((caisson) => caisson.id === selectedId)) setSelectedId(next.caissons[0].id)
+        setNotice(null)
       },
     }
   }, [doorsOpen, frameToken, historyMark, notice, project, selected])

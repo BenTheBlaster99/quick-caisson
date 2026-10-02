@@ -1,10 +1,11 @@
-import { ContactShadows, Edges, OrbitControls } from '@react-three/drei'
+import { ContactShadows, Edges, OrbitControls, Text } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { DoubleSide, PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three'
-import { inspectKitchen, placeColumns, upperSpan, worktopRuns, worktopTop, type PlacedColumn } from '../../kitchen/layout'
+import { cutRun, inspectKitchen, placeColumns, upperSpan, worktopRuns, worktopTop, type PlacedColumn } from '../../kitchen/layout'
 import { kitchenFinish, wallFinish } from '../../kitchen/finishes'
-import { mountRun, wallLength, builtWalls } from '../../kitchen/room'
+import { mountRun, wallLength, builtWalls, WALL_THICK } from '../../kitchen/room'
+import { wallPieces } from '../../kitchen/wall-pieces'
 import { moveColumn, moveIsland } from '../../kitchen/project'
 import type { HandleId, KitchenProject, Opening, WallId } from '../../kitchen/types'
 
@@ -105,7 +106,8 @@ function World({
       >
         <group scale={0.001} position={[-shown.wall.width / 2000, 0, -shown.room.depth / 2000]}>
           <Room project={shown} hidden={hidden} />
-          {shown.openings.filter((opening) => opening.wallId !== 'ilot' && opening.wallId !== hidden && builtWalls(shown.room.shape, shown.openings).includes(opening.wallId)).map((opening) => (
+          <WallNames project={shown} />
+          {shown.openings.filter((opening) => opening.wallId !== 'ilot' && opening.wallId !== 'D' && opening.wallId !== hidden && builtWalls(shown.room.shape, shown.room.lSide).includes(opening.wallId)).map((opening) => (
             <Mount key={opening.id} project={shown} wallId={opening.wallId} along={opening.x} size={opening.width}>
               <OpeningMark project={shown} opening={opening} />
             </Mount>
@@ -299,8 +301,8 @@ function Mount({ project, wallId, along, size, children }: { project: KitchenPro
 function Room({ project, hidden }: { project: KitchenProject; hidden: WallId | null }) {
   const { width } = project.wall
   const depth = project.room.depth
-  const thick = 90
-  const walls = builtWalls(project.room.shape, project.openings).filter((wallId) => wallId !== hidden)
+  const thick = WALL_THICK
+  const walls = builtWalls(project.room.shape, project.room.lSide).filter((wallId) => wallId !== hidden)
   const x0 = walls.includes('B') ? -thick : 0
   const x1 = walls.includes('C') ? width + thick : width
   const z0 = walls.includes('A') ? -thick : 0
@@ -331,24 +333,6 @@ function WallShell({ project, wallId }: { project: KitchenProject; wallId: WallI
   )
 }
 
-function wallPieces(length: number, ceiling: number, openings: Opening[]) {
-  const pieces: { x: number; y: number; w: number; h: number }[] = []
-  const sorted = [...openings].sort((a, b) => a.x - b.x)
-  let cursor = 0
-  for (const opening of sorted) {
-    const left = Math.max(cursor, Math.min(opening.x, length))
-    if (left > cursor) pieces.push({ x: cursor, y: 0, w: left - cursor, h: ceiling })
-    const start = Math.max(0, Math.min(opening.x, length))
-    const end = Math.max(start, Math.min(opening.x + opening.width, length))
-    if (opening.bottom > 0) pieces.push({ x: start, y: 0, w: end - start, h: Math.min(opening.bottom, ceiling) })
-    const top = Math.min(ceiling, opening.bottom + opening.height)
-    if (top < ceiling && end > start) pieces.push({ x: start, y: top, w: end - start, h: ceiling - top })
-    cursor = Math.max(cursor, end)
-  }
-  if (cursor < length) pieces.push({ x: cursor, y: 0, w: length - cursor, h: ceiling })
-  return pieces.filter((piece) => piece.w > 1 && piece.h > 1)
-}
-
 function WallPiece({
   project,
   wallId,
@@ -360,7 +344,7 @@ function WallPiece({
 }) {
   const { width } = project.wall
   const depth = project.room.depth
-  const thick = 90
+  const thick = WALL_THICK
   const y = piece.y + piece.h / 2
   const paint = wallId === 'ilot' ? wallFinish('blanc') : wallFinish(project.room.finishes[wallId])
   const material = <meshStandardMaterial color={paint.color} roughness={paint.roughness} metalness={paint.metalness} />
@@ -422,7 +406,8 @@ function DoorLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDown:
         <boxGeometry args={[28, opening.height, 70]} />
         <meshStandardMaterial color="#f3efe8" />
       </mesh>
-      <group position={[14, 0, 0]} rotation={[0, -0.42, 0]}>
+      <group position={[opening.width / 2, 0, 0]} scale={[opening.swing === 'droite' ? -1 : 1, 1, 1]}>
+      <group position={[14 - opening.width / 2, 0, 0]} rotation={[0, -0.42, 0]}>
         <mesh position={[leafW / 2, leafH / 2, 18]} onPointerDown={onPointerDown}>
           <boxGeometry args={[leafW, leafH, 36]} />
           <meshStandardMaterial color="#f7f4ee" roughness={0.55} />
@@ -440,6 +425,7 @@ function DoorLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDown:
           <meshStandardMaterial color="#c2b8a4" metalness={0.7} roughness={0.28} />
         </mesh>
       </group>
+      </group>
     </group>
   )
 }
@@ -456,7 +442,7 @@ function WindowLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDow
       <FrameBar y={0} width={32} height={opening.height} x={opening.width / 2 - 16} />
       <mesh>
         <boxGeometry args={[18, opening.height - 48, 28]} />
-        <meshStandardMaterial color="#f7f4ee" />
+        <meshStandardMaterial color="#1c1c1c" />
       </mesh>
       {[-1, 1].map((side) => (
         <mesh key={side} position={[side * (paneW / 2 + 10), 0, 0]}>
@@ -466,7 +452,7 @@ function WindowLeaf({ opening, onPointerDown }: { opening: Opening; onPointerDow
       ))}
       <mesh position={[0, -opening.height / 2 - 10, 36]} onPointerDown={onPointerDown}>
         <boxGeometry args={[opening.width + 80, 28, 90]} />
-        <meshStandardMaterial color="#f7f4ee" />
+        <meshStandardMaterial color="#1c1c1c" />
       </mesh>
     </group>
   )
@@ -476,7 +462,7 @@ function FrameBar({ x = 0, y, width, height }: { x?: number; y: number; width: n
   return (
     <mesh position={[x, y, 10]}>
       <boxGeometry args={[width, height, 14]} />
-      <meshStandardMaterial color="#f7f4ee" />
+      <meshStandardMaterial color="#1c1c1c" />
     </mesh>
   )
 }
@@ -547,8 +533,22 @@ function KitchenFurniture({
               color={stone}
               onGrab={run.wallId === 'ilot' ? grabIsland : undefined}
             />
-            {run.wallId !== 'ilot' && project.wall.backsplashHeight > 0 && (
-              <Box x={0} y={top} z={0} width={run.width} height={project.wall.backsplashHeight} depth={Math.max(12, project.rules.backsplashMm)} color="#f7f5f1" />
+            {run.wallId !== 'ilot' && project.wall.backsplashHeight > 0 && cutRun(run.x, run.width, project.openings
+              .filter((opening) => opening.wallId === run.wallId && opening.kind === 'fenetre' && opening.bottom < top + project.wall.backsplashHeight && opening.bottom + opening.height > top)
+              .map((opening) => ({ x: opening.x, width: opening.width })))
+              .map((part) => (
+                <Box key={`${part.x}-${part.width}`} x={part.x - run.x} y={top} z={0} width={part.width} height={project.wall.backsplashHeight} depth={Math.max(12, project.rules.backsplashMm)} color="#f7f5f1" />
+              ))}
+            {project.wall.plinthHeight > 0 && (
+              <Box
+                x={0}
+                y={0}
+                z={0}
+                width={run.width}
+                height={Math.max(4, project.wall.plinthHeight - 4)}
+                depth={(run.wallId === 'ilot' ? project.room.islandDepth : project.wall.baseDepth) - 40}
+                color="#2a2a28"
+              />
             )}
           </Mount>
         )
@@ -592,12 +592,13 @@ function Column({
     )
   }
 
+  if (column.kind === 'angle') {
+    return <AngleCabinet project={project} column={column} door={door} carcass={carcass} selected={selected} mark={mark} onSelect={pick} onGrab={grab} />
+  }
+
   const upper = column.upper === 'aucun' ? null : upperSpan(wall, rules, column.x, column.width)
   return (
     <group>
-      {wall.plinthHeight > 0 && (
-        <Box x={column.x + 18} y={0} z={18} width={column.width - 36} height={wall.plinthHeight - 4} depth={boxDepth - 70} color="#2a2a28" />
-      )}
       <Box x={column.x} y={wall.plinthHeight} z={0} width={column.width} height={wall.baseHeight} depth={boxDepth} color={carcass} selected={selected} mark={mark} onClick={pick} onGrab={grab} />
       <BaseFront project={project} column={column} door={door} onGrab={grab} />
       {upper && column.upper === 'hotte' && (
@@ -620,11 +621,67 @@ function Column({
           />
         </group>
       )}
-      {(column.base === 'plaque' || column.base === 'four-plaque') && (
+      {column.deck === 'plaque' && (
         <Hob x={column.x} y={worktopTop(wall) + 3} z={boxDepth * 0.22} width={column.width} />
       )}
-      {column.base === 'evier' && (
+      {column.deck === 'evier' && (
         <Sink x={column.x} y={worktopTop(wall) - 6} z={boxDepth * 0.28} width={column.width} />
+      )}
+    </group>
+  )
+}
+
+function WallNames({ project }: { project: KitchenProject }) {
+  const walls = builtWalls(project.room.shape, project.room.lSide)
+  const { width } = project.wall
+  const depth = project.room.depth
+  return (
+    <group>
+      {walls.includes('A') && (
+        <Text position={[width / 2, 1500, 70]} fontSize={120} color="#3a342c" anchorX="center" anchorY="middle">
+          Mur du fond
+        </Text>
+      )}
+      {walls.includes('B') && (
+        <Text position={[70, 1500, depth / 2]} rotation={[0, Math.PI / 2, 0]} fontSize={120} color="#3a342c" anchorX="center" anchorY="middle">
+          Mur gauche
+        </Text>
+      )}
+      {walls.includes('C') && (
+        <Text position={[width - 70, 1500, depth / 2]} rotation={[0, -Math.PI / 2, 0]} fontSize={120} color="#3a342c" anchorX="center" anchorY="middle">
+          Mur droit
+        </Text>
+      )}
+    </group>
+  )
+}
+
+function AngleCabinet({
+  project, column, door, carcass, selected, mark, onSelect, onGrab,
+}: {
+  project: KitchenProject
+  column: PlacedColumn
+  door: string
+  carcass: string
+  selected: boolean
+  mark: 'refus' | 'attention' | null
+  onSelect: () => void
+  onGrab: (point: Vector3) => void
+}) {
+  const { wall } = project
+  const depth = wall.baseDepth
+  const width = column.width
+  const right = column.returnWall === 'C'
+  const returnX = right ? width - depth : 0
+  const faceX = right ? 0 : depth
+  const faceW = Math.max(80, width - depth)
+  return (
+    <group>
+      <Box x={0} y={wall.plinthHeight} z={0} width={width} height={wall.baseHeight} depth={depth} color={carcass} selected={selected} mark={mark} onClick={onSelect} onGrab={onGrab} />
+      <Box x={returnX} y={wall.plinthHeight} z={0} width={depth} height={wall.baseHeight} depth={width} color={carcass} onClick={onSelect} onGrab={onGrab} />
+      <Front x={faceX} y={wall.plinthHeight} z={depth} width={faceW} height={wall.baseHeight} color={door} handle={column.handle} dark={project.finish === 'noir'} onGrab={onGrab} />
+      {wall.plinthHeight > 0 && (
+        <Box x={returnX} y={0} z={depth} width={depth} height={Math.max(4, wall.plinthHeight - 4)} depth={Math.max(40, width - depth)} color="#2a2a28" />
       )}
     </group>
   )
@@ -646,7 +703,7 @@ function BaseFront({ project, column, door, onGrab }: { project: KitchenProject;
       </group>
     )
   }
-  if (column.base === 'four' || column.base === 'four-plaque') {
+  if (column.base === 'four') {
     return <Oven x={column.x} y={y} z={z} width={column.width} height={wall.baseHeight} />
   }
   if (column.base === 'lave-vaisselle') {
@@ -820,14 +877,6 @@ function Sink({ x, y, z, width }: { x: number; y: number; z: number; width: numb
 function HandleMark({ x, y, z, width, handle, dark }: { x: number; y: number; z: number; width: number; handle: HandleId; dark: boolean }) {
   const metal = dark ? '#d9d9d6' : '#4a4a48'
   if (handle === 'aucune') return null
-  if (handle === 'integre') {
-    return (
-      <mesh position={[x, y + Math.min(70, width), z]}>
-        <boxGeometry args={[Math.min(120, width - 36), 8, 6]} />
-        <meshStandardMaterial color="#1c1c1c" />
-      </mesh>
-    )
-  }
   if (handle === 'barre') {
     return (
       <mesh position={[x, y, z]}>

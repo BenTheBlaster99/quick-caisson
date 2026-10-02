@@ -1,13 +1,15 @@
 import { MIN_CAISSON, MAX_CAISSON } from '../domain/rules'
-import { cornerInset, slideAlong, wallLength } from './room'
+import { cornerInset, footprint, slideAlong, wallLength } from './room'
 import type {
   BaseRole,
+  DeckRole,
   KitchenColumn,
   KitchenIssue,
   KitchenProfile,
   KitchenProject,
   KitchenWall,
   Opening,
+  TowerRole,
   UpperRole,
   WallId,
 } from './types'
@@ -55,7 +57,7 @@ export function worktopRuns(columns: KitchenColumn[]): WorktopRun[] {
     const sorted = columns.filter((column) => column.wallId === wallId).sort((a, b) => a.x - b.x)
     let run: WorktopRun | null = null
     for (const column of sorted) {
-      if (column.kind !== 'bas') {
+      if (column.kind === 'colonne') {
         if (run) runs.push(run)
         run = null
         continue
@@ -71,12 +73,41 @@ export function worktopRuns(columns: KitchenColumn[]): WorktopRun[] {
   return runs
 }
 
-function applianceMin(role: BaseRole, rules: KitchenProfile): number | null {
-  if (role === 'evier') return rules.evierMinMm
-  if (role === 'plaque' || role === 'four-plaque') return rules.plaqueMinMm
-  if (role === 'four') return rules.fourMinMm
-  if (role === 'lave-vaisselle') return rules.laveVaisselleMinMm
-  return null
+export type KitchenAdd =
+  | { kind: 'bas'; base: BaseRole; deck: DeckRole }
+  | { kind: 'colonne'; tower: TowerRole }
+  | { kind: 'angle'; returnWall: 'B' | 'C' }
+
+export function returnOccupancy(project: KitchenProject, wallId: WallId): { id: string; x: number; width: number }[] {
+  return project.columns
+    .filter((column) => column.kind === 'angle' && column.returnWall === wallId)
+    .map((column) => ({ id: column.id, x: 0, width: column.width }))
+}
+
+export function cutRun(x: number, width: number, holes: { x: number; width: number }[]): { x: number; width: number }[] {
+  const end = x + width
+  const cuts = holes
+    .map((hole) => ({ x: Math.max(x, hole.x), end: Math.min(end, hole.x + hole.width) }))
+    .filter((hole) => hole.end - hole.x > 0)
+    .sort((a, b) => a.x - b.x)
+  const parts: { x: number; width: number }[] = []
+  let cursor = x
+  for (const hole of cuts) {
+    if (hole.x - cursor > 2) parts.push({ x: cursor, width: hole.x - cursor })
+    cursor = Math.max(cursor, hole.end)
+  }
+  if (end - cursor > 2) parts.push({ x: cursor, width: end - cursor })
+  return parts
+}
+
+function applianceNeed(column: KitchenColumn, rules: KitchenProfile): { mm: number; name: string } | null {
+  const needs: { mm: number; name: string }[] = []
+  if (column.deck === 'evier') needs.push({ mm: rules.evierMinMm, name: "l'évier" })
+  if (column.deck === 'plaque') needs.push({ mm: rules.plaqueMinMm, name: 'la plaque' })
+  if (column.base === 'four') needs.push({ mm: rules.fourMinMm, name: 'le four' })
+  if (column.base === 'lave-vaisselle') needs.push({ mm: rules.laveVaisselleMinMm, name: 'le lave-vaisselle' })
+  if (needs.length === 0) return null
+  return needs.sort((a, b) => b.mm - a.mm)[0]!
 }
 
 function overlapWidth(a: { x: number; width: number }, opening: Opening): number {
@@ -123,6 +154,32 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
         })
       }
     }
+    for (const block of returnOccupancy(project, column.wallId)) {
+      if (block.id === column.id) continue
+      const overlap = Math.min(column.x + column.width, block.x + block.width) - Math.max(column.x, block.x)
+      if (overlap > 0) {
+        note(issues, {
+          level: 'refus',
+          columnId: column.id,
+          part: 'meuble',
+          overlapMm: overlap,
+          message: `${label} entre dans le meuble d'angle de ${overlap} mm.`,
+        })
+      }
+    }
+    if (column.kind === 'angle') {
+      const along = wallLength(project, 'A')
+      const expected = column.returnWall === 'C' ? along - column.width : 0
+      if (column.wallId !== 'A' || column.x !== expected) {
+        note(issues, {
+          level: 'refus',
+          columnId: column.id,
+          part: 'meuble',
+          overlapMm: Math.abs(column.x - expected),
+          message: `${label} : le meuble d'angle doit rester dans l'angle.`,
+        })
+      }
+    }
     if (column.kind === 'colonne') {
       if (column.tower === 'frigo' && column.width < project.rules.frigoMinMm) {
         note(issues, {
@@ -146,18 +203,18 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
           message: `${label} empiète de ${mm} mm sur ${openingName(opening.kind)}.`,
         })
       }
-      noteSwing(issues, column, project, label, top)
+      noteDoor(issues, column, project, label, top)
       return
     }
 
-    const needed = applianceMin(column.base, project.rules)
-    if (needed !== null && column.width < needed) {
+    const needed = applianceNeed(column, project.rules)
+    if (needed !== null && column.width < needed.mm) {
       note(issues, {
         level: 'refus',
         columnId: column.id,
         part: 'meuble',
-        overlapMm: needed - column.width,
-        message: `${label} : ${baseLabel(column.base)} demande ${needed} mm, ce meuble fait ${column.width} mm.`,
+        overlapMm: needed.mm - column.width,
+        message: `${label} : ${needed.name} demande ${needed.mm} mm, ce meuble fait ${column.width} mm.`,
       })
     }
 
@@ -189,7 +246,7 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
       }
     }
 
-    if ((column.base === 'plaque' || column.base === 'four-plaque') && (column.upper === 'haut' || column.upper === 'vitrine' || column.upper === 'micro-ondes')) {
+    if (column.deck === 'plaque' && (column.upper === 'haut' || column.upper === 'vitrine' || column.upper === 'micro-ondes')) {
       note(issues, {
         level: 'attention',
         columnId: column.id,
@@ -214,34 +271,69 @@ export function inspectKitchen(project: KitchenProject): { placed: PlacedColumn[
         })
       }
     }
-    noteSwing(issues, column, project, label, top)
+    noteDoor(issues, column, project, label, top)
   })
 
   return { placed, issues }
 }
 
-function noteSwing(issues: KitchenIssue[], column: PlacedColumn, project: KitchenProject, label: string, top: number) {
-  if (!hingedFront(column)) return
+function noteDoor(issues: KitchenIssue[], column: PlacedColumn, project: KitchenProject, label: string, top: number) {
+  const boxes = columnBoxes(project, column)
   for (const opening of project.openings) {
-        if (opening.wallId !== column.wallId) continue
     if (opening.kind !== 'porte' || opening.bottom >= top) continue
-    const gapRight = opening.x - (column.x + column.width)
-    const gapLeft = column.x - (opening.x + opening.width)
-    const touching = (gapRight >= 0 && gapRight <= 40) || (gapLeft >= 0 && gapLeft <= 40)
-    if (!touching) continue
-    note(issues, {
-      level: 'attention',
-      columnId: column.id,
-      part: 'meuble',
-      overlapMm: null,
-      message: `${label} : la porte du mur est contre la façade. Elle ne s'ouvre pas entièrement.`,
-    })
+    if (opening.wallId === column.wallId && hingedFront(column)) {
+      const gap = opening.swing === 'droite'
+        ? column.x - (opening.x + opening.width)
+        : opening.x - (column.x + column.width)
+      if (gap >= 0 && gap <= 40) {
+        note(issues, {
+          level: 'attention',
+          columnId: column.id,
+          part: 'meuble',
+          overlapMm: null,
+          message: `${label} : la charnière est de ce côté. La porte du mur ne s'ouvre pas entièrement.`,
+        })
+      }
+    }
+    if (opening.wallId === column.wallId) continue
+    const sweep = footprint(project.room, project.wall.width, opening.wallId, opening.x, opening.width, opening.width)
+    for (const box of boxes) {
+      const overlap = rectOverlap(box, sweep)
+      if (overlap <= 0) continue
+      const side = opening.swing === 'droite' ? 'droite' : 'gauche'
+      note(issues, {
+        level: 'attention',
+        columnId: column.id,
+        part: 'meuble',
+        overlapMm: overlap,
+        message: `${label} : la porte, charnière à ${side}, couvre ce meuble de ${overlap} mm.`,
+      })
+    }
   }
+}
+
+function columnBoxes(project: KitchenProject, column: PlacedColumn): { x: number; z: number; w: number; d: number }[] {
+  const into = column.wallId === 'ilot' ? project.room.islandDepth : project.wall.baseDepth
+  const boxes = [footprint(project.room, project.wall.width, column.wallId, column.x, column.width, into)]
+  if (column.kind === 'angle') {
+    boxes.push(footprint(project.room, project.wall.width, column.returnWall, 0, column.width, into))
+  }
+  return boxes
+}
+
+function rectOverlap(
+  a: { x: number; z: number; w: number; d: number },
+  b: { x: number; z: number; w: number; d: number },
+): number {
+  const x = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+  const z = Math.min(a.z + a.d, b.z + b.d) - Math.max(a.z, b.z)
+  if (x <= 0 || z <= 0) return 0
+  return Math.round(Math.min(x, z))
 }
 
 function hingedFront(column: KitchenColumn): boolean {
   if (column.kind === 'colonne') return column.tower === 'rangement'
-  return column.base === 'porte' || column.base === 'evier' || column.base === 'bouteilles'
+  return column.base === 'porte'
 }
 
 export function canCorrectIssue(issue: KitchenIssue): boolean {
@@ -259,29 +351,24 @@ export function openingName(kind: Opening['kind']): string {
 export function baseLabel(role: BaseRole): string {
   if (role === 'porte') return 'la porte'
   if (role === 'tiroirs') return 'les tiroirs'
-  if (role === 'evier') return "l'évier"
-  if (role === 'plaque') return 'la plaque'
   if (role === 'four') return 'le four'
-  if (role === 'four-plaque') return 'le four et la plaque'
-  if (role === 'lave-vaisselle') return 'le lave-vaisselle'
-  return 'le rangement bouteilles'
+  return 'le lave-vaisselle'
 }
 
 export function shortBase(role: BaseRole): string {
   if (role === 'porte') return 'Porte'
   if (role === 'tiroirs') return 'Tiroirs'
-  if (role === 'evier') return 'Évier'
-  if (role === 'plaque') return 'Plaque'
   if (role === 'four') return 'Four'
-  if (role === 'four-plaque') return 'Four + plaque'
-  if (role === 'lave-vaisselle') return 'Lave-vaisselle'
-  return 'Bouteilles'
+  return 'Lave-vaisselle'
 }
 
 export function moduleTitle(column: KitchenColumn): string {
+  if (column.kind === 'angle') return 'Angle'
   if (column.kind === 'colonne') return column.tower === 'frigo' ? 'Frigo' : 'Colonne'
-  if (column.upper === 'aucun') return shortBase(column.base)
-  return `${shortBase(column.base)} · ${upperLabel(column.upper)}`
+  const deck = column.deck === 'evier' ? 'Évier' : column.deck === 'plaque' ? 'Plaque' : ''
+  const front = deck ? `${shortBase(column.base)} · ${deck}` : shortBase(column.base)
+  if (column.upper === 'aucun') return front
+  return `${front} · ${upperLabel(column.upper)}`
 }
 
 export function upperLabel(role: UpperRole): string {
@@ -299,6 +386,12 @@ export function setColumnWidth(project: KitchenProject, index: number, width: nu
     return { ok: false, error: `Largeur : la limite est ${COLUMN_MIN}–${COLUMN_MAX} mm.` }
   }
   const room = wallLength(project, column.wallId)
+  if (column.kind === 'angle') {
+    const along = wallLength(project, 'A')
+    if (width > along) return { ok: false, error: 'Largeur refusée : le meuble sortirait du mur.' }
+    const x = column.returnWall === 'C' ? along - width : 0
+    return { ok: true, columns: project.columns.map((item, cursor) => (cursor === index ? { ...item, width, x, wallId: 'A' } : item)) }
+  }
   if (column.x + width > room) return { ok: false, error: `Largeur refusée : le meuble sortirait du mur.` }
   return { ok: true, columns: project.columns.map((item, cursor) => (cursor === index ? { ...item, width } : item)) }
 }
@@ -310,20 +403,59 @@ export function resizeKitchenWall(project: KitchenProject, _width: number): { ok
 export function placeColumn(project: KitchenProject, id: string, x: number): KitchenColumn[] {
   const column = project.columns.find((item) => item.id === id)
   if (!column || column.locked) return project.columns
-  const mates = project.columns.filter((item) => item.wallId === column.wallId)
+  if (column.kind === 'angle') {
+    const along = wallLength(project, 'A')
+    const pinned = column.returnWall === 'C' ? along - column.width : 0
+    return project.columns.map((item) => (item.id === id ? { ...item, x: pinned, wallId: 'A' } : item))
+  }
+  const ghosts = returnOccupancy(project, column.wallId).map((block) => ({ id: `${block.id}-retour`, x: block.x, width: block.width }))
+  const mates = [...project.columns.filter((item) => item.wallId === column.wallId), ...ghosts]
   const next = slideAlong(mates, id, column.width, x, cornerInset(project, column.wallId), wallLength(project, column.wallId))
   return project.columns.map((item) => (item.id === id ? { ...item, x: next } : item))
+}
+
+export function swapColumn(
+  project: KitchenProject,
+  id: string,
+  direction: -1 | 1,
+): { ok: true; columns: KitchenColumn[] } | { ok: false; error: string } {
+  const column = project.columns.find((item) => item.id === id)
+  if (!column) return { ok: false, error: 'Meuble introuvable.' }
+  if (column.kind === 'angle' || column.locked) return { ok: false, error: 'Ce meuble reste en place.' }
+  const mates = project.columns
+    .filter((item) => item.wallId === column.wallId && item.kind !== 'angle')
+    .sort((a, b) => a.x - b.x || a.id.localeCompare(b.id))
+  const index = mates.findIndex((item) => item.id === id)
+  const other = mates[index + direction]
+  if (!other || other.locked) return { ok: false, error: 'Pas de voisin à échanger.' }
+  const left = column.x <= other.x ? column : other
+  const right = left.id === column.id ? other : column
+  const movingLeft = right
+  const movingRight = left
+  const xLeft = left.x
+  const xRight = left.x + movingLeft.width
+  return {
+    ok: true,
+    columns: project.columns.map((item) => {
+      if (item.id === movingLeft.id) return { ...item, x: xLeft }
+      if (item.id === movingRight.id) return { ...item, x: xRight }
+      return item
+    }),
+  }
 }
 
 export function addKitchenColumn(
   project: KitchenProject,
   wallId: WallId,
+  spec: KitchenAdd,
   createId: () => string,
 ): { ok: true; columns: KitchenColumn[]; selectedIndex: number } | { ok: false; error: string } {
+  if (spec.kind === 'angle') return addAngle(project, spec.returnWall, createId)
   const length = wallLength(project, wallId)
   const inset = cornerInset(project, wallId)
   const blocked = [
     ...project.columns.filter((column) => column.wallId === wallId).map((column) => ({ x: column.x, width: column.width })),
+    ...returnOccupancy(project, wallId),
     ...project.openings.filter((opening) => opening.wallId === wallId && opening.kind !== 'fenetre').map((opening) => ({ x: opening.x, width: opening.width })),
   ].sort((a, b) => a.x - b.x)
   let cursor = inset
@@ -348,8 +480,48 @@ export function addKitchenColumn(
     x: spot,
     width,
     locked: false,
-    kind: 'bas',
+    kind: spec.kind,
+    base: spec.kind === 'bas' ? spec.base : 'porte',
+    deck: spec.kind === 'bas' ? spec.deck : 'rien',
+    returnWall: 'B',
+    tower: spec.kind === 'colonne' ? spec.tower : 'frigo',
+    upper: 'aucun',
+    handle: 'bouton',
+  }
+  const columns = [...project.columns, created]
+  return { ok: true, columns, selectedIndex: columns.length - 1 }
+}
+
+function addAngle(
+  project: KitchenProject,
+  returnWall: 'B' | 'C',
+  createId: () => string,
+): { ok: true; columns: KitchenColumn[]; selectedIndex: number } | { ok: false; error: string } {
+  const shape = project.room.shape
+  const side = project.room.lSide
+  const allowed = returnWall === 'B'
+    ? shape === 'u' || (shape === 'l' && side !== 'droite')
+    : shape === 'u' || (shape === 'l' && side === 'droite')
+  if (!allowed) return { ok: false, error: "Meuble d'angle : ce coin n'existe pas dans cette pièce." }
+  const along = wallLength(project, 'A')
+  const width = Math.min(900, along, wallLength(project, returnWall))
+  if (width < 600) return { ok: false, error: "Meuble d'angle : le coin est trop court." }
+  const x = returnWall === 'C' ? along - width : 0
+  const taken = (wallId: WallId, start: number) => project.columns.some((column) => {
+    if (column.wallId !== wallId) return false
+    return start < column.x + column.width && start + width > column.x
+  }) || returnOccupancy(project, wallId).some((block) => start < block.x + block.width && start + width > block.x)
+  if (taken('A', x) || taken(returnWall, 0)) return { ok: false, error: "Meuble d'angle : le coin est déjà occupé." }
+  const created: KitchenColumn = {
+    id: createId(),
+    wallId: 'A',
+    x,
+    width,
+    locked: false,
+    kind: 'angle',
     base: 'porte',
+    deck: 'rien',
+    returnWall,
     tower: 'frigo',
     upper: 'aucun',
     handle: 'bouton',

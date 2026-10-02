@@ -1,11 +1,14 @@
-export type HandleId = 'aucune' | 'integre' | 'bouton' | 'barre'
+export type HandleId = 'aucune' | 'bouton' | 'barre'
 export type KitchenFinishId = 'blanc' | 'chene-clair' | 'chene' | 'chene-fonce' | 'gris' | 'noir'
 export type WallFinishId = 'blanc' | 'greige' | 'sable' | 'gris' | 'sauge' | 'bleu' | 'terre' | 'noir' | 'carrelage' | 'beton' | 'bois'
 export type OpeningKind = 'fenetre' | 'porte' | 'interdit'
-export type BaseRole = 'porte' | 'tiroirs' | 'evier' | 'plaque' | 'four' | 'four-plaque' | 'lave-vaisselle' | 'bouteilles'
+export type DoorSwing = 'gauche' | 'droite'
+export type BaseRole = 'porte' | 'tiroirs' | 'four' | 'lave-vaisselle'
+export type DeckRole = 'rien' | 'evier' | 'plaque'
 export type UpperRole = 'aucun' | 'haut' | 'hotte' | 'vitrine' | 'micro-ondes'
 export type TowerRole = 'frigo' | 'rangement'
 export type KitchenShape = 'lineaire' | 'l' | 'u'
+export type LSide = 'gauche' | 'droite'
 export type WallId = 'A' | 'B' | 'C' | 'D' | 'ilot'
 
 export type KitchenWall = {
@@ -29,6 +32,7 @@ export type KitchenRoom = {
   islandDepth: number
   islandX: number
   islandZ: number
+  lSide: LSide
   finishes: WallFinishes
 }
 
@@ -40,6 +44,8 @@ export type Opening = {
   width: number
   bottom: number
   height: number
+  /** Hinge side, seen from inside the room. Ignored unless the opening is a door. */
+  swing: DoorSwing
 }
 
 export type KitchenColumn = {
@@ -48,8 +54,10 @@ export type KitchenColumn = {
   x: number
   width: number
   locked: boolean
-  kind: 'bas' | 'colonne'
+  kind: 'bas' | 'colonne' | 'angle'
   base: BaseRole
+  deck: DeckRole
+  returnWall: 'B' | 'C'
   tower: TowerRole
   upper: UpperRole
   handle: HandleId
